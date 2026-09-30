@@ -15,7 +15,11 @@ Livrables prévus : API de prédiction, tests automatisés, conteneurisation Doc
 │   └── 01_entrainement_modele_projet6.ipynb   # Notebook d'entraînement d'origine (Projet 6)
 ├── examples/
 │   └── client_exemple.json   # Exemple de client au format attendu
-└── requirements.txt
+├── tests/
+│   ├── test_predict.py # Tests unitaires du script d'inférence
+│   └── test_api.py     # Tests d'intégration de l'API (cas valides et cas d'erreur)
+├── requirements.txt      # Dépendances de l'API (production)
+└── requirements-dev.txt  # + dépendances de test
 ```
 
 ## Le modèle
@@ -84,6 +88,22 @@ Exemple de réponse 422 quand `AMT_CREDIT` manque :
 ```json
 {"detail": [{"type": "missing", "loc": ["body", "AMT_CREDIT"], "msg": "Field required", ...}]}
 ```
+
+## Lancer les tests
+
+```bash
+pip install -r requirements-dev.txt
+pytest --cov=src
+```
+
+Il y a 33 tests, avec 93 % de couverture du code :
+- **Script d'inférence** : prédiction de référence sur le client d'exemple (0.361), probabilité entre 0 et 1, respect du seuil, imputation des variables manquantes, prédiction de plusieurs clients à la fois.
+- **API, cas valides** : `/health`, client complet, client réduit aux champs obligatoires, valeurs `null` sur les champs facultatifs.
+- **API, cas d'erreur** :
+  - données manquantes : chaque champ obligatoire absent ou à `null`, client vide ;
+  - valeurs hors plage : âge positif, trop jeune ou trop vieux, revenu, crédit ou annuité nuls ou négatifs, score externe hors de [0, 1] ;
+  - types incorrects : texte au lieu d'un nombre, variable inconnue, JSON mal formé ;
+  - erreur interne du modèle, qui doit renvoyer une 500 explicite.
 
 ## Faire une prédiction sans l'API
 

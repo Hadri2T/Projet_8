@@ -1,0 +1,7 @@
+# Dépendances de développement (tests), en plus de celles de l'API.
+# Séparées de requirements.txt pour ne pas alourdir l'image Docker de production.
+-r requirements.txt
+pytest==9.1.1
+pytest-cov==7.1.0
+# Client HTTP utilisé par le TestClient de FastAPI (httpx2 remplace httpx, déprécié par Starlette)
+httpx2==2.13.1
