@@ -1,0 +1,6 @@
+# Versions identiques à celles de l'entraînement (Projet 6) pour recharger le modèle sans écart
+numpy==1.26.4
+pandas==2.2.3
+scikit-learn==1.5.2
+lightgbm==4.6.0
+cloudpickle==3.1.2

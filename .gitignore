@@ -1,0 +1,19 @@
+# Fichiers de travail locaux (non publiés)
+README_travail.md
+
+# Données Home Credit (volumineuses, jamais publiées)
+data/
+
+# Secrets (identifiants, tokens)
+.env
+
+# Python / Jupyter
+.venv/
+venv/
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+.pytest_cache/
+
+# macOS
+.DS_Store
