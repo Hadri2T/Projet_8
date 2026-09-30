@@ -1,0 +1,16 @@
+# Fichiers exclus du contexte de build Docker (build plus rapide, image sans fichiers inutiles ou sensibles)
+.git/
+.github/
+.venv/
+venv/
+data/
+notebooks/
+tests/
+__pycache__/
+*.pyc
+.pytest_cache/
+.coverage
+htmlcov/
+.env
+*.md
+.DS_Store

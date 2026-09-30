@@ -18,6 +18,7 @@ Livrables prévus : API de prédiction, tests automatisés, conteneurisation Doc
 ├── tests/
 │   ├── test_predict.py # Tests unitaires du script d'inférence
 │   └── test_api.py     # Tests d'intégration de l'API (cas valides et cas d'erreur)
+├── Dockerfile            # Image de l'API (production)
 ├── requirements.txt      # Dépendances de l'API (production)
 └── requirements-dev.txt  # + dépendances de test
 ```
@@ -88,6 +89,23 @@ Exemple de réponse 422 quand `AMT_CREDIT` manque :
 ```json
 {"detail": [{"type": "missing", "loc": ["body", "AMT_CREDIT"], "msg": "Field required", ...}]}
 ```
+
+## Lancer l'API avec Docker
+
+```bash
+docker build -t scoring-api .
+docker run -p 7860:7860 scoring-api
+```
+
+L'API est alors disponible sur http://localhost:7860/docs.
+
+L'image ne contient que ce qui est nécessaire pour faire tourner l'API : le code `src/`, le modèle `model/` et le client d'exemple. Les notebooks, les tests et les outils de test en sont exclus.
+- **Python 3.12**, comme à l'entraînement.
+- **`libgomp1`** est ajoutée, car LightGBM en a besoin.
+- L'API tourne avec un **utilisateur sans droits administrateur**.
+- Un **contrôle de santé** Docker appelle `/health` toutes les 30 secondes.
+
+Mesures en local : environ 110 Mo de RAM et 12 à 15 ms par requête.
 
 ## Lancer les tests
 
