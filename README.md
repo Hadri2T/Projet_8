@@ -9,7 +9,8 @@ Livrables prévus : API de prédiction, tests automatisés, conteneurisation Doc
 ```
 ├── model/              # Modèle champion exporté du model registry MLflow
 ├── src/
-│   └── predict.py      # Script d'inférence (chargement du modèle + prédiction)
+│   ├── predict.py      # Script d'inférence (chargement du modèle + prédiction)
+│   └── api.py          # API FastAPI qui expose le modèle
 ├── notebooks/
 │   └── 01_entrainement_modele_projet6.ipynb   # Notebook d'entraînement d'origine (Projet 6)
 ├── examples/
@@ -42,7 +43,49 @@ source .venv/bin/activate
 pip install -r requirements.txt
 ```
 
-## Faire une prédiction
+## Lancer l'API
+
+```bash
+uvicorn src.api:app --reload
+```
+
+La documentation interactive (Swagger) est disponible sur http://127.0.0.1:8000/docs. Le client d'exemple y est pré-rempli : il suffit de cliquer sur *Try it out* puis *Execute*.
+
+| Route | Méthode | Rôle |
+|---|---|---|
+| `/` | GET | Message d'accueil |
+| `/health` | GET | Vérifie que l'API répond : `{"status": "ok"}` |
+| `/predict` | POST | Score un client |
+
+Exemple avec curl :
+
+```bash
+curl -X POST http://127.0.0.1:8000/predict \
+     -H "Content-Type: application/json" \
+     -d @examples/client_exemple.json
+# {"probabilite_defaut":0.361,"decision":"accorde","seuil":0.5}
+```
+
+### Données attendues et gestion des erreurs
+
+Le client est envoyé en JSON au format `{nom_variable: valeur}`, avec les 215 variables du modèle.
+
+- **Champs obligatoires** : `AMT_CREDIT`, `AMT_ANNUITY`, `AMT_INCOME_TOTAL` (strictement positifs) et `DAYS_BIRTH` (âge en jours compté négativement, entre 18 et 100 ans). Ces champs sont toujours renseignés dans les données d'entraînement. Sans eux, on refuse de scorer.
+- **Champs facultatifs** : toutes les autres variables. Une variable absente ou à `null` est considérée comme manquante et imputée par le modèle. Les scores `EXT_SOURCE_1/2/3` doivent être compris entre 0 et 1.
+
+| Code | Cas |
+|---|---|
+| 200 | Prédiction réussie |
+| 422 | Données invalides : champ obligatoire manquant, valeur hors plage, texte au lieu d'un nombre, variable inconnue. Le message indique le champ en cause. |
+| 500 | Erreur inattendue pendant la prédiction |
+
+Exemple de réponse 422 quand `AMT_CREDIT` manque :
+
+```json
+{"detail": [{"type": "missing", "loc": ["body", "AMT_CREDIT"], "msg": "Field required", ...}]}
+```
+
+## Faire une prédiction sans l'API
 
 ```bash
 python -m src.predict examples/client_exemple.json
