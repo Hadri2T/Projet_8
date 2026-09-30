@@ -1,0 +1,23 @@
+artifact_path: /Users/hadrien/Desktop/OpenClassrooms_livrables/Projet_6/mlruns/1/models/m-bd90cadc8ed0479186402893b5fa4259/artifacts
+flavors:
+  python_function:
+    env:
+      conda: conda.yaml
+      virtualenv: python_env.yaml
+    loader_module: mlflow.sklearn
+    model_path: model.pkl
+    predict_fn: predict
+    python_version: 3.12.9
+  sklearn:
+    code: null
+    pickled_model: model.pkl
+    serialization_format: cloudpickle
+    sklearn_version: 1.5.2
+    skops_trusted_types: null
+mlflow_version: 3.12.0
+model_id: m-bd90cadc8ed0479186402893b5fa4259
+model_size_bytes: 402113
+model_uuid: m-bd90cadc8ed0479186402893b5fa4259
+prompts: null
+run_id: e90a8b7a7b5245a2871afe18e7597530
+utc_time_created: '2026-07-29 16:36:20.028507'
