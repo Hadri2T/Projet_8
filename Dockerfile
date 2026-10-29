@@ -25,6 +25,11 @@ COPY --chown=user src/ src/
 COPY --chown=user model/ model/
 COPY --chown=user examples/ examples/
 
+# Version du code (hash du commit), fournie par la CI au build et enregistrée avec chaque appel.
+# Placée après les COPY : elle change à chaque build, sans invalider le cache des étapes précédentes.
+ARG GIT_SHA=local
+ENV GIT_SHA=$GIT_SHA
+
 # Port par défaut. Un hébergeur peut imposer le sien via la variable PORT (Render utilise 10000) :
 # la commande de lancement et le healthcheck lisent donc PORT au lieu d'un numéro écrit en dur
 ENV PORT=7860

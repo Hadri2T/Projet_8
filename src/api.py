@@ -1,24 +1,46 @@
 """
 API de scoring crédit "Prêt à Dépenser" (FastAPI).
 
-Lancement en local :
-    uvicorn src.api:app --reload
+Lancement en local (la variable DATABASE_URL est lue dans le fichier .env) :
+    uvicorn src.api:app --reload --env-file .env
 Documentation interactive (Swagger) : http://127.0.0.1:8000/docs
 """
 
 import json
+import logging
+import os
+import time
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, Request
+from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.exceptions import RequestValidationError
 from pydantic import BaseModel, ConfigDict, Field, create_model
+from starlette.concurrency import run_in_threadpool
 
+from src.database import creer_table, enregistrer_appel
 from src.predict import THRESHOLD, get_features, load_model, predict
+
+# Logs structurés : une ligne JSON par appel, lisible en direct dans l'onglet Logs de Render
+logging.basicConfig(level=logging.INFO, format="%(message)s")
+logger = logging.getLogger("scoring_api")
+
+# Version du code (hash du commit), inscrite dans l'image Docker par la CI ; "local" sinon
+VERSION = os.getenv("GIT_SHA", "local")[:7]
 
 # Chargement du modèle UNE SEULE FOIS, au démarrage de l'API, puis réutilisé par toutes les requêtes
 # (le recharger à chaque requête ralentirait fortement l'API)
 model = load_model()
 FEATURES = get_features(model)
+
+# Création de la table de stockage au démarrage. Si la base est injoignable, l'API démarre quand même :
+# la prédiction passe avant le monitoring.
+try:
+    creer_table()
+except Exception as e:
+    logger.warning(json.dumps({"alerte": "base de données injoignable au démarrage", "detail": str(e)}))
 
 # Client d'exemple, affiché pré-rempli dans Swagger pour tester l'API en un clic
 EXAMPLE_PATH = Path(__file__).resolve().parent.parent / "examples" / "client_exemple.json"
@@ -102,11 +124,64 @@ def health():
 
 
 @app.post("/predict", response_model=Prediction)
-def predict_client(client: Client):
+def predict_client(client: Client, request: Request):
     """Score un client : les données sont validées par Pydantic avant d'arriver ici."""
+    donnees = client.model_dump()
+    # Pour le stockage, on ne garde que les variables renseignées : les manquantes prendraient de la place pour rien
+    entrees = {k: v for k, v in donnees.items() if v is not None}
     try:
-        result = predict(model, [client.model_dump()])[0]
+        debut = time.perf_counter()
+        result = predict(model, [donnees])[0]
+        inference_ms = (time.perf_counter() - debut) * 1000
     except Exception as e:
         # Erreur inattendue pendant la prédiction : réponse 500 explicite plutôt qu'un crash de l'API
+        request.state.log = {"entrees": entrees, "erreur": str(e)}
         raise HTTPException(status_code=500, detail=f"Erreur lors de la prédiction : {e}")
+    # Informations transmises au middleware, qui écrit la ligne en base
+    request.state.log = {"entrees": entrees, **result, "inference_ms": round(inference_ms, 2)}
     return {**result, "seuil": THRESHOLD}
+
+
+# ---------------------------------------------------------------------------
+# Stockage des appels (monitoring et data drift)
+# ---------------------------------------------------------------------------
+
+@app.exception_handler(RequestValidationError)
+async def erreur_de_validation(request: Request, exc: RequestValidationError):
+    """Données invalides (422) : on note les champs en cause pour le stockage, puis on renvoie
+    la réponse 422 standard de FastAPI (inchangée)."""
+    request.state.log = {
+        "erreur": "; ".join(f"{e['loc'][-1]}: {e['msg']}" for e in exc.errors()),
+    }
+    return await request_validation_exception_handler(request, exc)
+
+
+@app.middleware("http")
+async def enregistrer_les_appels(request: Request, call_next):
+    """Entoure chaque requête : chronomètre /predict, puis enregistre l'appel en base (succès comme erreur)."""
+    if request.url.path != "/predict":
+        return await call_next(request)
+
+    debut = time.perf_counter()
+    response = await call_next(request)  # la route /predict (ou le gestionnaire d'erreur) s'exécute ici
+    ligne = {
+        "date_appel": datetime.now(timezone.utc),
+        "statut_http": response.status_code,
+        "latence_ms": round((time.perf_counter() - debut) * 1000, 2),
+        "version": VERSION,
+        **getattr(request.state, "log", {}),  # entrées, score, décision ou erreur, selon le cas
+    }
+
+    # Écriture en base dans un thread à part, pour ne pas bloquer les autres requêtes pendant l'écriture.
+    # Si la base est en panne, on le signale dans les logs mais la réponse part quand même.
+    debut_ecriture = time.perf_counter()
+    try:
+        await run_in_threadpool(enregistrer_appel, ligne)
+    except Exception as e:
+        logger.warning(json.dumps({"alerte": "écriture en base impossible", "detail": str(e)}))
+    ecriture_ms = round((time.perf_counter() - debut_ecriture) * 1000, 2)
+
+    # Log structuré (sans les 215 variables, trop volumineuses pour les logs)
+    resume = {k: v for k, v in ligne.items() if k != "entrees"}
+    logger.info(json.dumps({**resume, "ecriture_bdd_ms": ecriture_ms}, default=str))
+    return response

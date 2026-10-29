@@ -48,9 +48,10 @@ jobs:
       - name: Récupérer le code
         uses: actions/checkout@v7
 
-      # Deux étiquettes : le hash du commit (version précise, traçable) et latest (dernière version)
+      # Deux étiquettes : le hash du commit (version précise, traçable) et latest (dernière version).
+      # GIT_SHA est inscrit dans l'image : chaque appel enregistré en base porte la version qui l'a traité.
       - name: Construire l'image
-        run: docker build -t $IMAGE:${{ github.sha }} -t $IMAGE:latest .
+        run: docker build --build-arg GIT_SHA=${{ github.sha }} -t $IMAGE:${{ github.sha }} -t $IMAGE:latest .
 
       # Test de fumée : on lance le conteneur et on vérifie qu'il répond vraiment
       - name: Tester l'image (health + prédiction)

@@ -12,14 +12,16 @@ Livrables prévus : API de prédiction, tests automatisés, conteneurisation Doc
 ├── model/              # Modèle champion exporté du model registry MLflow
 ├── src/
 │   ├── predict.py      # Script d'inférence (chargement du modèle + prédiction)
-│   └── api.py          # API FastAPI qui expose le modèle
+│   ├── api.py          # API FastAPI qui expose le modèle
+│   └── database.py     # Stockage des appels en base (PostgreSQL / SQLite)
 ├── notebooks/
 │   └── 01_entrainement_modele_projet6.ipynb   # Notebook d'entraînement d'origine (Projet 6)
 ├── examples/
 │   └── client_exemple.json   # Exemple de client au format attendu
 ├── tests/
 │   ├── test_predict.py # Tests unitaires du script d'inférence
-│   └── test_api.py     # Tests d'intégration de l'API (cas valides et cas d'erreur)
+│   ├── test_api.py     # Tests d'intégration de l'API (cas valides et cas d'erreur)
+│   └── test_stockage.py # Tests du stockage des appels
 ├── .github/workflows/
 │   └── ci-cd.yml       # Pipeline CI/CD : tests → image Docker → déploiement
 ├── Dockerfile            # Image de l'API (production)
@@ -56,6 +58,17 @@ pip install -r requirements.txt
 
 ```bash
 uvicorn src.api:app --reload
+```
+
+Les appels à `/predict` sont alors enregistrés dans un fichier SQLite local, `logs_local.db`.
+
+Pour les enregistrer dans la base PostgreSQL de production :
+1. Créez un fichier `.env` à la racine, contenant la ligne `DATABASE_URL=postgresql://...`. Ce fichier n'est jamais versionné.
+2. Lancez l'API avec :
+
+```bash
+pip install -r requirements-dev.txt   # contient python-dotenv, nécessaire pour --env-file
+uvicorn src.api:app --reload --env-file .env
 ```
 
 La documentation interactive (Swagger) est disponible sur http://127.0.0.1:8000/docs. Le client d'exemple y est pré-rempli : il suffit de cliquer sur *Try it out* puis *Execute*.
@@ -98,7 +111,8 @@ Exemple de réponse 422 quand `AMT_CREDIT` manque :
 
 ```bash
 docker build -t scoring-api .
-docker run -p 7860:7860 scoring-api
+docker run -p 7860:7860 scoring-api                  # appels enregistrés en SQLite dans le conteneur
+docker run -p 7860:7860 --env-file .env scoring-api  # appels enregistrés dans PostgreSQL (Neon)
 ```
 
 L'API est alors disponible sur http://localhost:7860/docs.
@@ -118,7 +132,7 @@ pip install -r requirements-dev.txt
 pytest --cov=src
 ```
 
-Il y a 33 tests, avec 93 % de couverture du code :
+Il y a 39 tests, avec 94 % de couverture du code. Ils écrivent dans une base SQLite temporaire, jamais dans la base de production.
 - **Script d'inférence** : prédiction de référence sur le client d'exemple (0.361), probabilité entre 0 et 1, respect du seuil, imputation des variables manquantes, prédiction de plusieurs clients à la fois.
 - **API, cas valides** : `/health`, client complet, client réduit aux champs obligatoires, valeurs `null` sur les champs facultatifs.
 - **API, cas d'erreur** :
@@ -126,6 +140,35 @@ Il y a 33 tests, avec 93 % de couverture du code :
   - valeurs hors plage : âge positif, trop jeune ou trop vieux, revenu, crédit ou annuité nuls ou négatifs, score externe hors de [0, 1] ;
   - types incorrects : texte au lieu d'un nombre, variable inconnue, JSON mal formé ;
   - erreur interne du modèle, qui doit renvoyer une 500 explicite.
+- **Stockage** :
+  - un appel réussi est enregistré avec les bonnes valeurs ;
+  - seules les variables renseignées sont stockées ;
+  - les erreurs 422 et 500 sont enregistrées ;
+  - `/health` n'est pas enregistré ;
+  - une base en panne n'empêche pas l'API de répondre.
+
+## Stockage des données de production
+
+Chaque appel à `/predict`, réussi ou en erreur, est enregistré dans une base **PostgreSQL hébergée sur [Neon](https://neon.tech)**, région Frankfurt. La base est séparée de l'API : les données survivent aux redéploiements et aux mises en veille de Render. Elle est aussi accessible depuis l'extérieur, ce qui permet d'analyser le drift et d'alimenter le dashboard en continu.
+
+Table `predictions` :
+
+| Colonne | Contenu |
+|---|---|
+| `date_appel` | Date et heure de l'appel (UTC) |
+| `statut_http` | 200 (succès), 422 (données invalides) ou 500 (erreur interne) |
+| `latence_ms` | Temps total pour produire la réponse : validation + modèle |
+| `inference_ms` | Temps du modèle seul |
+| `entrees` | Variables envoyées par le client, au format JSON. Seules celles renseignées sont stockées. |
+| `probabilite_defaut`, `decision` | Sortie du modèle |
+| `erreur` | Champs en cause pour une 422, message pour une 500 |
+| `version` | Hash du commit qui a traité l'appel, inscrit dans l'image Docker par la CI |
+
+- **Base choisie par `DATABASE_URL`** : sur Render, cette variable est rangée dans les variables d'environnement du service ; en local, elle est dans le fichier `.env`. Si elle est absente, l'API écrit dans un fichier SQLite local.
+- **Robustesse** : si la base est injoignable, l'API répond quand même et signale le problème dans ses logs.
+- **Logs structurés** : en plus de la base, chaque appel produit une ligne JSON dans les logs de l'API, visibles dans l'onglet *Logs* de Render. Cette ligne contient tout, sauf les variables du client.
+- **RGPD** : aucun identifiant client n'est stocké, et les données restent dans l'Union européenne.
+- **Volume** : environ 6 Ko par appel, dont 5,7 Ko pour les variables du client d'exemple. Sans les valeurs manquantes, on économise environ 30 %. L'offre gratuite de Neon (0,5 Go) permet donc de l'ordre de 80 000 appels.
 
 ## Pipeline CI/CD
 

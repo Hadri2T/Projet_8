@@ -19,3 +19,6 @@ htmlcov/
 
 # macOS
 .DS_Store
+
+# Bases SQLite locales (stockage des appels hors Neon)
+*.db

@@ -5,3 +5,5 @@ pytest==9.1.1
 pytest-cov==7.1.0
 # Client HTTP utilisé par le TestClient de FastAPI (httpx2 remplace httpx, déprécié par Starlette)
 httpx2==2.13.1
+# Lecture du fichier .env en local (uvicorn --env-file .env, notebooks) ; inutile en production
+python-dotenv==1.2.4
