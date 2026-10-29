@@ -20,10 +20,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Récupérer le code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Installer Python 3.12 (même version qu'à l'entraînement)
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: "3.12"
           cache: pip  # garde les paquets téléchargés d'un run à l'autre
@@ -46,7 +46,7 @@ jobs:
       packages: write  # autorise GITHUB_TOKEN à publier l'image sur ghcr.io
     steps:
       - name: Récupérer le code
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       # Deux étiquettes : le hash du commit (version précise, traçable) et latest (dernière version)
       - name: Construire l'image

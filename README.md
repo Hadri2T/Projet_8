@@ -2,6 +2,8 @@
 
 Mise en production du modèle de scoring développé et versionné avec MLflow lors du projet précédent (*Initiez-vous au MLOps, partie 1*). Le modèle prédit la probabilité qu'un client ne rembourse pas son crédit, puis décide d'accorder ou de refuser la demande.
 
+**API en ligne** : https://scoring-api-latest-shx9.onrender.com/docs. Elle est hébergée sur l'offre gratuite de Render : après 15 minutes sans requête, la première réponse peut prendre environ une minute.
+
 Livrables prévus : API de prédiction, tests automatisés, conteneurisation Docker, pipeline CI/CD, stockage des données de production, analyse du data drift, dashboard de monitoring et optimisation du temps d'inférence.
 
 ## Structure du dépôt
@@ -136,7 +138,7 @@ Le pipeline GitHub Actions ([.github/workflows/ci-cd.yml](.github/workflows/ci-c
 | `deploy` | Demande à Render de déployer la nouvelle image. | ✅ | ❌ |
 
 - **Image Docker** : `ghcr.io/hadri2t/scoring-api`. Chaque version porte le hash du commit, et `latest` désigne la dernière.
-- **Hébergement** : l'API tourne sur [Render](https://render.com), dans l'offre gratuite. Render lance directement l'image publiée sur ghcr.io.
+- **Hébergement** : l'API tourne sur [Render](https://render.com), dans l'offre gratuite, à l'adresse https://scoring-api-latest-shx9.onrender.com. Render lance directement l'image publiée sur ghcr.io.
 - **On déploie exactement l'image testée** : Render ne reconstruit pas l'API à partir du code. Le job `deploy` lui indique l'étiquette précise à lancer, c'est-à-dire le hash du commit.
 - **Secrets** : le seul secret est l'URL de déploiement de Render (`RENDER_DEPLOY_HOOK`), rangée dans les secrets du dépôt GitHub. La publication sur ghcr.io utilise le jeton fourni automatiquement par GitHub (`GITHUB_TOKEN`).
 - **Limites de l'offre gratuite** : l'API se met en veille après 15 minutes sans requête. La requête suivante la réveille, en environ une minute.
