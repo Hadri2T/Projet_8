@@ -1,0 +1,92 @@
+name: CI/CD
+
+# Déclencheurs : chaque push sur main (tests + build + déploiement)
+# et chaque pull request vers main (tests + build seulement, sans rien publier)
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+env:
+  # Nom de l'image sur GitHub Container Registry (en minuscules, obligatoire pour ghcr.io)
+  IMAGE: ghcr.io/hadri2t/scoring-api
+
+jobs:
+  # ──────────────────────────────────────────
+  # JOB 1 : tests unitaires et d'intégration
+  # ──────────────────────────────────────────
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Récupérer le code
+        uses: actions/checkout@v4
+
+      - name: Installer Python 3.12 (même version qu'à l'entraînement)
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip  # garde les paquets téléchargés d'un run à l'autre
+
+      - name: Installer les dépendances (API + tests)
+        run: pip install -r requirements-dev.txt
+
+      # Le job échoue si un test échoue ou si la couverture passe sous 90 %
+      - name: Lancer les tests
+        run: pytest --cov=src --cov-report=term-missing --cov-fail-under=90
+
+  # ──────────────────────────────────────────
+  # JOB 2 : construction de l'image Docker (seulement si les tests passent)
+  # ──────────────────────────────────────────
+  build:
+    runs-on: ubuntu-latest
+    needs: test
+    permissions:
+      contents: read
+      packages: write  # autorise GITHUB_TOKEN à publier l'image sur ghcr.io
+    steps:
+      - name: Récupérer le code
+        uses: actions/checkout@v4
+
+      # Deux étiquettes : le hash du commit (version précise, traçable) et latest (dernière version)
+      - name: Construire l'image
+        run: docker build -t $IMAGE:${{ github.sha }} -t $IMAGE:latest .
+
+      # Test de fumée : on lance le conteneur et on vérifie qu'il répond vraiment
+      - name: Tester l'image (health + prédiction)
+        run: |
+          docker run -d -p 7860:7860 --name api $IMAGE:latest
+          # On attend que le modèle soit chargé (30 s maximum)
+          for i in $(seq 1 30); do
+            curl -sf http://localhost:7860/health && break
+            sleep 1
+          done
+          # -f : curl échoue (et donc le job aussi) si l'API renvoie une erreur HTTP
+          curl -sf -X POST http://localhost:7860/predict \
+               -H "Content-Type: application/json" \
+               -d @examples/client_exemple.json
+          docker rm -f api
+
+      # Publication sur GitHub Container Registry, uniquement lors d'un push sur main
+      - name: Publier l'image sur ghcr.io
+        if: github.event_name == 'push'
+        run: |
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u ${{ github.actor }} --password-stdin
+          docker push $IMAGE:${{ github.sha }}
+          docker push $IMAGE:latest
+
+  # ──────────────────────────────────────────
+  # JOB 3 : déploiement sur Render (seulement sur un push sur main)
+  # ──────────────────────────────────────────
+  deploy:
+    runs-on: ubuntu-latest
+    needs: build
+    if: github.event_name == 'push'
+    steps:
+      # Render ne surveille pas ghcr.io : on lui demande de redéployer en appelant son "deploy hook"
+      # (une URL secrète). imgURL précise l'image exacte testée au job 2 (étiquette = hash du commit) :
+      # on déploie donc exactement ce qui a été testé.
+      - name: Déclencher le déploiement sur Render
+        env:
+          RENDER_DEPLOY_HOOK: ${{ secrets.RENDER_DEPLOY_HOOK }}
+        run: curl -fsS -X POST "$RENDER_DEPLOY_HOOK&imgURL=$IMAGE:${{ github.sha }}"

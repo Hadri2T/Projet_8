@@ -18,6 +18,8 @@ Livrables prévus : API de prédiction, tests automatisés, conteneurisation Doc
 ├── tests/
 │   ├── test_predict.py # Tests unitaires du script d'inférence
 │   └── test_api.py     # Tests d'intégration de l'API (cas valides et cas d'erreur)
+├── .github/workflows/
+│   └── ci-cd.yml       # Pipeline CI/CD : tests → image Docker → déploiement
 ├── Dockerfile            # Image de l'API (production)
 ├── requirements.txt      # Dépendances de l'API (production)
 └── requirements-dev.txt  # + dépendances de test
@@ -122,6 +124,23 @@ Il y a 33 tests, avec 93 % de couverture du code :
   - valeurs hors plage : âge positif, trop jeune ou trop vieux, revenu, crédit ou annuité nuls ou négatifs, score externe hors de [0, 1] ;
   - types incorrects : texte au lieu d'un nombre, variable inconnue, JSON mal formé ;
   - erreur interne du modèle, qui doit renvoyer une 500 explicite.
+
+## Pipeline CI/CD
+
+Le pipeline GitHub Actions ([.github/workflows/ci-cd.yml](.github/workflows/ci-cd.yml)) se lance à chaque push et à chaque pull request sur `main`. Il enchaîne trois jobs, et chacun ne démarre que si le précédent a réussi :
+
+| Job | Rôle | Push sur `main` | Pull request |
+|---|---|---|---|
+| `test` | Lance les tests pytest. Le job échoue si un test échoue ou si la couverture passe sous 90 %. | ✅ | ✅ |
+| `build` | Construit l'image Docker, la lance, vérifie que `/health` et `/predict` répondent, puis la publie sur GitHub Container Registry. | ✅ (avec publication) | ✅ (sans publication) |
+| `deploy` | Demande à Render de déployer la nouvelle image. | ✅ | ❌ |
+
+- **Image Docker** : `ghcr.io/hadri2t/scoring-api`. Chaque version porte le hash du commit, et `latest` désigne la dernière.
+- **Hébergement** : l'API tourne sur [Render](https://render.com), dans l'offre gratuite. Render lance directement l'image publiée sur ghcr.io.
+- **On déploie exactement l'image testée** : Render ne reconstruit pas l'API à partir du code. Le job `deploy` lui indique l'étiquette précise à lancer, c'est-à-dire le hash du commit.
+- **Secrets** : le seul secret est l'URL de déploiement de Render (`RENDER_DEPLOY_HOOK`), rangée dans les secrets du dépôt GitHub. La publication sur ghcr.io utilise le jeton fourni automatiquement par GitHub (`GITHUB_TOKEN`).
+- **Limites de l'offre gratuite** : l'API se met en veille après 15 minutes sans requête. La requête suivante la réveille, en environ une minute.
+- **Pourquoi pas Hugging Face Spaces** : depuis juillet 2026, Hugging Face fait payer les Spaces Docker. Les Spaces Gradio restent gratuits, mais ils ne lancent pas d'image Docker : ils réinstallent le code Python eux-mêmes.
 
 ## Faire une prédiction sans l'API
 
