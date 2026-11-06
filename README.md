@@ -18,7 +18,8 @@ Livrables prévus : API de prédiction, tests automatisés, conteneurisation Doc
 │   ├── 01_entrainement_modele_projet6.ipynb   # Notebook d'entraînement d'origine (Projet 6)
 │   └── 02_analyse_drift_monitoring.ipynb      # Analyse du data drift et rapport de monitoring
 ├── scripts/
-│   └── simulation_trafic.py  # Simulation de trafic de production vers l'API déployée
+│   ├── simulation_trafic.py  # Simulation de trafic de production vers l'API déployée
+│   └── mesure_inference.py   # Mesure et profilage du temps d'inférence (avant / après optimisation)
 ├── examples/
 │   └── client_exemple.json   # Exemple de client au format attendu
 ├── tests/

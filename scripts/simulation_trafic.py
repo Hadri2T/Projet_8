@@ -46,12 +46,17 @@ def nettoyer(nom):
     return re.sub(r"[^0-9a-zA-Z_]+", "_", nom)
 
 
-def charger_clients_test(chemin=DONNEES):
-    """Clients du jeu de test Kaggle (TARGET vide), avec les 215 variables du modèle."""
+def charger_clients(chemin=DONNEES):
+    """Tous les clients du Projet 6 (entraînement + test Kaggle), avec les 215 variables du modèle et TARGET."""
     # On ne lit que les colonnes utiles : le fichier en contient 789
     colonnes = {nom: nettoyer(nom) for nom in pq.read_schema(chemin).names if nettoyer(nom) in FEATURES}
-    df = pd.read_parquet(chemin, columns=list(colonnes) + ["TARGET"])
-    return df[df["TARGET"].isna()].drop(columns="TARGET").rename(columns=colonnes)
+    return pd.read_parquet(chemin, columns=list(colonnes) + ["TARGET"]).rename(columns=colonnes)
+
+
+def charger_clients_test(chemin=DONNEES):
+    """Clients du jeu de test Kaggle (TARGET vide), avec les 215 variables du modèle."""
+    clients = charger_clients(chemin)
+    return clients[clients["TARGET"].isna()].drop(columns="TARGET")
 
 
 def appliquer_derive(clients):
