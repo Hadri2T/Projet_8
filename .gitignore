@@ -22,3 +22,6 @@ htmlcov/
 
 # Bases SQLite locales (stockage des appels hors Neon)
 *.db
+
+# Rapports HTML générés par le notebook de drift (volumineux, régénérables)
+reports/

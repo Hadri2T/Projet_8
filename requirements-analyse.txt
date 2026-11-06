@@ -1,0 +1,9 @@
+# Dépendances de l'analyse (notebook de drift et de monitoring), en plus de celles de développement.
+# Séparées de requirements-dev.txt pour ne pas ralentir les tests de la CI (Evidently ajoute ~100 paquets).
+# numpy, pandas et scikit-learn restent figés par requirements.txt : le modèle se recharge à l'identique.
+-r requirements-dev.txt
+evidently==0.7.23
+matplotlib==3.11.2
+# Exécution du notebook (dans VS Code / Jupyter, ou en ligne de commande avec nbconvert)
+ipykernel==7.4.0
+nbconvert==7.17.2

@@ -15,7 +15,8 @@ Livrables prévus : API de prédiction, tests automatisés, conteneurisation Doc
 │   ├── api.py          # API FastAPI qui expose le modèle
 │   └── database.py     # Stockage des appels en base (PostgreSQL / SQLite)
 ├── notebooks/
-│   └── 01_entrainement_modele_projet6.ipynb   # Notebook d'entraînement d'origine (Projet 6)
+│   ├── 01_entrainement_modele_projet6.ipynb   # Notebook d'entraînement d'origine (Projet 6)
+│   └── 02_analyse_drift_monitoring.ipynb      # Analyse du data drift et rapport de monitoring
 ├── scripts/
 │   └── simulation_trafic.py  # Simulation de trafic de production vers l'API déployée
 ├── examples/
@@ -27,8 +28,9 @@ Livrables prévus : API de prédiction, tests automatisés, conteneurisation Doc
 ├── .github/workflows/
 │   └── ci-cd.yml       # Pipeline CI/CD : tests → image Docker → déploiement
 ├── Dockerfile            # Image de l'API (production)
-├── requirements.txt      # Dépendances de l'API (production)
-└── requirements-dev.txt  # + dépendances de test
+├── requirements.txt          # Dépendances de l'API (production)
+├── requirements-dev.txt      # + dépendances de test
+└── requirements-analyse.txt  # + dépendances du notebook d'analyse (Evidently, matplotlib, Jupyter)
 ```
 
 ## Le modèle
@@ -187,6 +189,69 @@ python scripts/simulation_trafic.py --help      # options : adresse, nombre de c
 Le script lit le jeu de données préparé au projet précédent, dans `data/prepared_dataset.parquet`. Ce fichier n'est pas versionné.
 
 - **Volume** : 3 000 appels occupent 9 Mo, soit environ 3 Ko par appel, car PostgreSQL compresse le JSON. Sans les valeurs manquantes, les variables d'un client pèsent environ 30 % de moins. L'offre gratuite de Neon (0,5 Go) permet donc de l'ordre de 150 000 appels.
+
+## Analyse du data drift et monitoring
+
+Le notebook [notebooks/02_analyse_drift_monitoring.ipynb](notebooks/02_analyse_drift_monitoring.ipynb) relit les appels stockés dans la base de production et les analyse automatiquement. Il peut être relancé à tout moment pour obtenir un rapport à jour.
+
+### Lancer l'analyse
+
+```bash
+pip install -r requirements-analyse.txt
+jupyter nbconvert --to notebook --execute --inplace notebooks/02_analyse_drift_monitoring.ipynb
+```
+
+On peut aussi l'exécuter cellule par cellule dans VS Code ou Jupyter. Il faut :
+- le fichier `.env`, qui contient `DATABASE_URL` ;
+- le jeu de données `data/prepared_dataset.parquet`, qui sert de référence.
+
+Le notebook génère aussi deux rapports Evidently interactifs, `reports/drift_periode_1.html` et `reports/drift_periode_2.html`. Ils ne sont pas versionnés (18 Mo chacun) : il suffit de relancer le notebook pour les régénérer.
+
+### Ce que contient le rapport
+
+| Partie | Contenu |
+|---|---|
+| Monitoring opérationnel | Volume d'appels, taux d'erreur par champ en cause, latence et temps d'inférence (médiane, p95), latence dans le temps |
+| Suivi des prédictions | Distribution des scores, score moyen et taux de refus, comparés à la référence |
+| Data drift | Pour chacune des 215 variables, comparaison de la production avec la référence (Evidently), avec un zoom sur les 20 variables les plus importantes du modèle |
+| Alertes | Un tableau ✅ OK / 🚨 ALERTE par règle et par période |
+
+**La référence** est le jeu de validation du projet précédent : 61 502 clients, sur lesquels le modèle a été évalué (AUC 0,785) et qu'il n'a pas vus pendant l'entraînement.
+
+### Interpréter le monitoring
+
+Commencez par le **tableau d'alertes**. Chaque règle a un seuil fixé à l'avance :
+
+| Règle | Seuil | Ce que signifie une alerte |
+|---|---|---|
+| Taux d'erreur | > 5 % | Une application cliente envoie massivement des données invalides : regarder le tableau des erreurs par champ. |
+| Erreurs internes (500) | > 0 | Le modèle ou le code a planté : consulter les logs de Render. |
+| Latence p95 | > 1 s | L'API est trop lente pour un usage en quasi temps réel : vérifier la charge et le matériel. |
+| Variables importantes en dérive | ≥ 50 % des 20 plus importantes | La clientèle ne ressemble plus à celle sur laquelle le modèle a été validé. |
+| Dérive des scores | ≥ 0,1 | Le modèle ne produit plus les mêmes scores qu'à la validation. |
+| Écart du taux de refus | > 10 points | L'activité de crédit change nettement : à expliquer au métier. |
+
+**Comment lire la dérive.** Pour chaque variable, Evidently compare sa distribution en production à celle de la référence :
+- pour une variable numérique, il calcule la distance de Wasserstein normalisée, c'est-à-dire le décalage exprimé en écarts-types de la référence ;
+- pour une variable à 5 valeurs ou moins, il calcule la distance de Jensen-Shannon.
+
+Une variable est en dérive à partir de 0,1.
+
+**Une dérive des entrées n'est pas forcément un problème.** Il faut regarder si elle touche les variables importantes, et surtout si **les scores** changent. Comme on ne connaît le remboursement réel d'un client que des mois plus tard, la dérive des entrées et des scores sert d'alerte précoce.
+
+### Résultats sur le trafic simulé
+
+| | Période 1 (clients normaux) | Période 2 (campagne : clients jeunes, crédits +30 %) |
+|---|---|---|
+| Taux d'erreur | 2,1 % ✅ | 2,0 % ✅ |
+| Latence p95 | 4,3 s 🚨 | 4,8 s 🚨 |
+| Variables importantes en dérive | 35 % ✅ | 80 % 🚨 |
+| Dérive des scores | 0,04 ✅ | 0,44 🚨 |
+| Taux de refus (référence : 30,3 %) | 29,3 % ✅ | 47,2 % 🚨 |
+
+- **Période 1** : il y a une dérive naturelle sur `PAYMENT_RATE` et sur les montants, car le jeu de test Kaggle ne contient presque pas de crédits renouvelables. Elle n'a aucun effet sur les scores.
+- **Période 2** : la campagne simulée est détectée à la fois sur les entrées, sur les scores et sur le taux de refus.
+- **La latence** dépasse le seuil dans les deux périodes. La cause : 8 requêtes simultanées sur l'offre gratuite de Render, qui ne dispose que de 0,1 CPU. Le modèle représente 95 % du temps de réponse, et le débit plafonne à environ 1,7 appel par seconde. C'est l'objet de l'étape d'optimisation.
 
 ## Pipeline CI/CD
 
