@@ -1,5 +1,7 @@
 """Tests d'intégration de l'API (src/api.py) : requêtes HTTP de bout en bout, sans serveur."""
 
+import json
+
 import pytest
 
 import src.api
@@ -115,6 +117,16 @@ def test_variable_inconnue(api, client_exemple):
     response = api.post("/predict", json=client_exemple)
     assert response.status_code == 422
     assert champ_en_erreur(response) == "AMT_CREDITT"
+
+
+@pytest.mark.parametrize("valeur", [float("inf"), float("-inf"), float("nan")])
+@pytest.mark.parametrize("champ", ["AMT_CREDIT", "INSTAL_PAYMENT_PERC_MEAN"])
+def test_valeur_infinie_ou_nan(api, client_exemple, champ, valeur):
+    # Le JSON est écrit à la main : json.dumps produit Infinity / NaN, que la lecture du corps accepte
+    client_exemple[champ] = valeur
+    response = api.post("/predict", content=json.dumps(client_exemple), headers={"Content-Type": "application/json"})
+    assert response.status_code == 422
+    assert champ_en_erreur(response) == champ
 
 
 def test_json_mal_forme(api):

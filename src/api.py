@@ -15,8 +15,9 @@ from pathlib import Path
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Request
-from fastapi.exception_handlers import request_validation_exception_handler
+from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
+from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, create_model
 from starlette.concurrency import run_in_threadpool
 
@@ -81,9 +82,11 @@ fields.update(REQUIRED_FIELDS)
 
 # Modèle Pydantic construit automatiquement à partir de la liste des variables du modèle.
 # extra="forbid" : une variable inconnue (ex. faute de frappe) renvoie une erreur au lieu d'être ignorée.
+# allow_inf_nan=False : Infinity et NaN sont refusés (PostgreSQL ne sait pas les stocker en JSON,
+# l'appel serait servi sans être enregistré). Une valeur manquante s'envoie avec null.
 Client = create_model(
     "Client",
-    __config__=ConfigDict(extra="forbid", json_schema_extra={"examples": [EXAMPLE_CLIENT]}),
+    __config__=ConfigDict(extra="forbid", allow_inf_nan=False, json_schema_extra={"examples": [EXAMPLE_CLIENT]}),
     **fields,
 )
 
@@ -149,11 +152,14 @@ def predict_client(client: Client, request: Request):
 @app.exception_handler(RequestValidationError)
 async def erreur_de_validation(request: Request, exc: RequestValidationError):
     """Données invalides (422) : on note les champs en cause pour le stockage, puis on renvoie
-    la réponse 422 standard de FastAPI (inchangée)."""
+    la réponse 422 au format standard de FastAPI."""
     request.state.log = {
         "erreur": "; ".join(f"{e['loc'][-1]}: {e['msg']}" for e in exc.errors()),
     }
-    return await request_validation_exception_handler(request, exc)
+    # On retire la valeur reçue ("input") : elle peut être infinie, donc impossible à écrire en JSON,
+    # et pour un champ manquant elle contient tout le dossier du client, qu'on ne renvoie pas.
+    erreurs = [{k: v for k, v in e.items() if k != "input"} for e in exc.errors()]
+    return JSONResponse(status_code=422, content={"detail": jsonable_encoder(erreurs)})
 
 
 @app.middleware("http")

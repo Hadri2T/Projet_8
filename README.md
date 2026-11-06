@@ -102,13 +102,13 @@ Le client est envoyé en JSON au format `{nom_variable: valeur}`, avec les 215 v
 | Code | Cas |
 |---|---|
 | 200 | Prédiction réussie |
-| 422 | Données invalides : champ obligatoire manquant, valeur hors plage, texte au lieu d'un nombre, variable inconnue. Le message indique le champ en cause. |
+| 422 | Données invalides : champ obligatoire manquant, valeur hors plage, texte au lieu d'un nombre, valeur infinie ou NaN (une valeur manquante s'envoie avec `null`), variable inconnue. Le message indique le champ en cause. |
 | 500 | Erreur inattendue pendant la prédiction |
 
 Exemple de réponse 422 quand `AMT_CREDIT` manque :
 
 ```json
-{"detail": [{"type": "missing", "loc": ["body", "AMT_CREDIT"], "msg": "Field required", ...}]}
+{"detail": [{"type": "missing", "loc": ["body", "AMT_CREDIT"], "msg": "Field required"}]}
 ```
 
 ## Lancer l'API avec Docker
