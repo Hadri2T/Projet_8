@@ -16,6 +16,8 @@ Livrables prévus : API de prédiction, tests automatisés, conteneurisation Doc
 │   └── database.py     # Stockage des appels en base (PostgreSQL / SQLite)
 ├── notebooks/
 │   └── 01_entrainement_modele_projet6.ipynb   # Notebook d'entraînement d'origine (Projet 6)
+├── scripts/
+│   └── simulation_trafic.py  # Simulation de trafic de production vers l'API déployée
 ├── examples/
 │   └── client_exemple.json   # Exemple de client au format attendu
 ├── tests/
@@ -168,7 +170,23 @@ Table `predictions` :
 - **Robustesse** : si la base est injoignable, l'API répond quand même et signale le problème dans ses logs.
 - **Logs structurés** : en plus de la base, chaque appel produit une ligne JSON dans les logs de l'API, visibles dans l'onglet *Logs* de Render. Cette ligne contient tout, sauf les variables du client.
 - **RGPD** : aucun identifiant client n'est stocké, et les données restent dans l'Union européenne.
-- **Volume** : environ 6 Ko par appel, dont 5,7 Ko pour les variables du client d'exemple. Sans les valeurs manquantes, on économise environ 30 %. L'offre gratuite de Neon (0,5 Go) permet donc de l'ordre de 80 000 appels.
+### Simulation de trafic de production
+
+L'API n'ayant pas encore de vrais utilisateurs, le script `scripts/simulation_trafic.py` simule leur arrivée. Il envoie à l'API en ligne des clients du jeu de test Kaggle : des clients jamais vus par le modèle, dont on ne sait pas s'ils ont remboursé, comme de vraies nouvelles demandes.
+
+1. **Vague normale** : 2 000 clients tels quels.
+2. **Vague de dérive** : 1 000 clients reflétant le scénario d'une campagne qui attire une clientèle plus jeune. Ils ont moins de 35 ans, et leurs montants de crédit et d'annuité sont augmentés de 30 %. Ce drift volontaire permet de vérifier que l'analyse le détecte.
+3. **Requêtes invalides** : environ 2 % dans chaque vague (champ oublié, valeur impossible, texte au lieu d'un nombre), pour alimenter le suivi du taux d'erreur.
+
+```bash
+pip install -r requirements-dev.txt
+python scripts/simulation_trafic.py             # vers l'API Render (environ 20 min)
+python scripts/simulation_trafic.py --help      # options : adresse, nombre de clients, parallélisme...
+```
+
+Le script lit le jeu de données préparé au projet précédent, dans `data/prepared_dataset.parquet`. Ce fichier n'est pas versionné.
+
+- **Volume** : 3 000 appels occupent 9 Mo, soit environ 3 Ko par appel, car PostgreSQL compresse le JSON. Sans les valeurs manquantes, les variables d'un client pèsent environ 30 % de moins. L'offre gratuite de Neon (0,5 Go) permet donc de l'ordre de 150 000 appels.
 
 ## Pipeline CI/CD
 

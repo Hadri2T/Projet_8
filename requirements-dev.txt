@@ -7,3 +7,5 @@ pytest-cov==7.1.0
 httpx2==2.13.1
 # Lecture du fichier .env en local (uvicorn --env-file .env, notebooks) ; inutile en production
 python-dotenv==1.2.4
+# Lecture du jeu de données Home Credit (format parquet) pour la simulation de trafic et l'analyse du drift
+pyarrow==19.0.1
