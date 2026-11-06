@@ -14,6 +14,9 @@ Dans chaque vague, environ 2 % de requêtes invalides (champ oublié, valeur imp
 Utilisation (depuis la racine du projet) :
     python scripts/simulation_trafic.py                                  # 2 000 + 1 000 clients vers Render
     python scripts/simulation_trafic.py --url http://127.0.0.1:8765 --normaux 20 --derives 10   # essai local
+    # Mesure de performance (étape 4) : les 1 000 premiers clients de la vague normale, sans erreur ni dérive,
+    # avec un bilan à part pour ne pas écraser celui de la simulation de dérive
+    python scripts/simulation_trafic.py --normaux 1000 --derives 0 --taux-erreur 0 --bilan data/mesure_render.json
 """
 
 import argparse
@@ -156,6 +159,7 @@ def main():
     parser.add_argument("--derives", type=int, default=1000, help="nombre de clients de la vague de dérive")
     parser.add_argument("--taux-erreur", type=float, default=0.02, help="part de requêtes invalides")
     parser.add_argument("--paralleles", type=int, default=8, help="requêtes envoyées en même temps")
+    parser.add_argument("--bilan", type=Path, default=BILAN, help="fichier où enregistrer les dates de chaque vague")
     args = parser.parse_args()
 
     random.seed(42)  # tirages reproductibles
@@ -165,13 +169,15 @@ def main():
     derives = appliquer_derive(clients.drop(normaux.index)).sample(args.derives, random_state=42)
     print(f"{len(clients)} clients de test chargés | API : {args.url}")
 
+    # Une vague à 0 client (ex. --derives 0) n'est pas envoyée
     bilans = [
-        lancer_vague("normale", args.url, normaux, args.taux_erreur, args.paralleles),
-        lancer_vague("derive", args.url, derives, args.taux_erreur, args.paralleles),
+        lancer_vague(nom, args.url, vague, args.taux_erreur, args.paralleles)
+        for nom, vague in [("normale", normaux), ("derive", derives)]
+        if len(vague)
     ]
-    with open(BILAN, "w") as f:
+    with open(args.bilan, "w") as f:
         json.dump(bilans, f, indent=2, ensure_ascii=False)
-    print(f"\nBilan enregistré dans {BILAN.relative_to(ROOT)}")
+    print(f"\nBilan enregistré dans {args.bilan}")
 
 
 if __name__ == "__main__":
