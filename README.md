@@ -16,7 +16,8 @@ Livrables prévus : API de prédiction, tests automatisés, conteneurisation Doc
 │   └── database.py     # Stockage des appels en base (PostgreSQL / SQLite)
 ├── notebooks/
 │   ├── 01_entrainement_modele_projet6.ipynb   # Notebook d'entraînement d'origine (Projet 6)
-│   └── 02_analyse_drift_monitoring.ipynb      # Analyse du data drift et rapport de monitoring
+│   ├── 02_analyse_drift_monitoring.ipynb      # Analyse du data drift et rapport de monitoring
+│   └── 03_optimisation_performances.ipynb     # Rapport d'optimisation des performances (étape 4)
 ├── scripts/
 │   ├── simulation_trafic.py  # Simulation de trafic de production vers l'API déployée
 │   └── mesure_inference.py   # Mesure et profilage du temps d'inférence (avant / après optimisation)
@@ -253,6 +254,35 @@ Une variable est en dérive à partir de 0,1.
 - **Période 1** : il y a une dérive naturelle sur `PAYMENT_RATE` et sur les montants, car le jeu de test Kaggle ne contient presque pas de crédits renouvelables. Elle n'a aucun effet sur les scores.
 - **Période 2** : la campagne simulée est détectée à la fois sur les entrées, sur les scores et sur le taux de refus.
 - **La latence** dépasse le seuil dans les deux périodes. La cause : 8 requêtes simultanées sur l'offre gratuite de Render, qui ne dispose que de 0,1 CPU. Le modèle représente 95 % du temps de réponse, et le débit plafonne à environ 1,7 appel par seconde. C'est l'objet de l'étape d'optimisation.
+
+## Optimisation des performances
+
+Le rapport complet est le notebook [notebooks/03_optimisation_performances.ipynb](notebooks/03_optimisation_performances.ipynb). Il contient les mesures, le profilage, les essais, la non-régression, le gain sur Render et la justification de la configuration.
+
+**Le goulot d'étranglement n'était pas le modèle.**
+- Le profilage (`cProfile`) montre que 80 % du temps de prédiction était passé dans l'imputation des valeurs manquantes. Ce code pandas du Projet 6 modifiait le tableau colonne par colonne, environ 150 fois par client.
+- LightGBM ne représentait que 10 % du temps : ONNX Runtime n'aurait donc presque rien apporté.
+
+**L'optimisation.** L'imputation est refaite en numpy dans `src/predict.py` (`imputer_rapide`) :
+- avec les mêmes règles et les mêmes valeurs apprises ;
+- avec le même `model.pkl` ;
+- avec des scores identiques sur les 356 251 clients du Projet 6, vérifiés par un test dans la CI.
+
+| | Avant | Après |
+|---|---|---|
+| Prédiction d'un client, en local | environ 12 ms | environ 2,7 ms |
+| Latence serveur médiane sur Render (8 requêtes simultanées) | 2,8 s | 0,29 s |
+| Latence serveur p95 sur Render | 4,4 s | 0,61 s ✅ (objectif : moins de 1 s) |
+| Débit sur Render | 1,6 appel/s | 5,6 appels/s |
+
+Les deux versions ont été comparées sur les mêmes clients, grâce à la colonne `version` de la base de production.
+
+Pour relancer les mesures :
+
+```bash
+python -m scripts.mesure_inference          # mesure locale et non-régression (sans base de données)
+python scripts/simulation_trafic.py --normaux 1000 --derives 0 --taux-erreur 0 --bilan data/mesure_render.json   # trafic vers Render
+```
 
 ## Pipeline CI/CD
 
