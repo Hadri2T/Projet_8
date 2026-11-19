@@ -18,9 +18,32 @@ DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./logs_local.db")
 # Neon fournit une adresse "postgresql://..." : on indique à SQLAlchemy d'utiliser le pilote psycopg (version 3)
 DATABASE_URL = DATABASE_URL.replace("postgresql://", "postgresql+psycopg://", 1)
 
+# Délai maximal (en secondes) accordé à la base. Sans lui, une base injoignable bloquerait indéfiniment les
+# écritures, et les threads bloqués finiraient par manquer à l'API pour répondre. 10 s laissent à Neon le
+# temps de se réveiller après une mise en veille (l'écriture est en tâche de fond : le client n'attend pas).
+DELAI_MAX_BASE_S = 10
+
+
+def parametres_connexion(url):
+    """Délais maximaux côté client pour PostgreSQL (le pilote psycopg les transmet à libpq) :
+    - connect_timeout : pour établir la connexion ;
+    - tcp_user_timeout : quand le réseau ne répond plus au milieu d'une requête (en millisecondes).
+    Ils ne sont pas envoyés au serveur, ce qui les rend compatibles avec le pooler de connexions de Neon.
+    SQLite (tests, local) est un simple fichier : rien à régler."""
+    if not url.startswith("postgresql"):
+        return {}
+    return {"connect_timeout": DELAI_MAX_BASE_S, "tcp_user_timeout": DELAI_MAX_BASE_S * 1000}
+
+
 # pool_pre_ping : vérifie qu'une connexion est encore ouverte avant de s'en servir
-# (Neon coupe les connexions quand la base se met en veille après quelques minutes sans activité)
-engine = create_engine(DATABASE_URL, pool_pre_ping=True)
+# (Neon coupe les connexions quand la base se met en veille après quelques minutes sans activité).
+# pool_timeout : attente maximale d'une connexion libre dans le pool, si elles sont toutes occupées.
+engine = create_engine(
+    DATABASE_URL,
+    pool_pre_ping=True,
+    pool_timeout=DELAI_MAX_BASE_S,
+    connect_args=parametres_connexion(DATABASE_URL),
+)
 
 metadata = MetaData()
 

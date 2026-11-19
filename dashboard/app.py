@@ -382,28 +382,28 @@ voir_sql(SQL_CHIFFRES_CLES)
 
 st.subheader("2. Comparaison des versions")
 st.caption(
-    "Une ligne par version de l'API, avec le modèle qui l'a servie : on y lit l'effet de chaque changement "
+    "Une colonne par version de l'API, avec le modèle qui l'a servie : on y lit l'effet de chaque changement "
     "(code ou modèle) sur les mêmes indicateurs."
 )
 par_version = lire(nom_base, SQL_PAR_VERSION, versions=versions)
-st.dataframe(
-    par_version,
-    hide_index=True,
-    alt="Indicateurs clés par version de l'API",
-    column_config={
-        "version": "Version API",
-        "version_modele": "Modèle",
-        "premier_appel": st.column_config.DatetimeColumn("1er appel (UTC)", format="DD/MM/YY HH:mm"),
-        "appels": st.column_config.NumberColumn("Appels"),
-        "taux_erreur_pct": st.column_config.NumberColumn("Erreurs %", format="%.1f"),
-        "erreurs_500": st.column_config.NumberColumn("500"),
-        "latence_mediane_ms": st.column_config.NumberColumn("Latence méd. ms", format="%.0f"),
-        "latence_p95_ms": st.column_config.NumberColumn("Latence p95 ms", format="%.0f"),
-        "inference_mediane_ms": st.column_config.NumberColumn("Inférence méd. ms", format="%.0f"),
-        "score_moyen": st.column_config.NumberColumn("Score moyen", format="%.3f"),
-        "taux_refus_pct": st.column_config.NumberColumn("Refus %", format="%.1f"),
-    },
-)
+# Une colonne par version et une ligne par indicateur : le tableau reste lisible quel que soit le nombre
+# de versions (avec une ligne par version, les 11 indicateurs débordaient de l'écran)
+comparaison = pd.DataFrame(
+    {
+        "Modèle": par_version["version_modele"],
+        "Premier appel (UTC)": par_version["premier_appel"].dt.strftime("%d/%m/%Y %H:%M"),
+        "Appels": par_version["appels"].map(nombre),
+        "Taux d'erreur": par_version["taux_erreur_pct"].map(lambda v: nombre(v, 1, "%")),
+        "Erreurs internes (500)": par_version["erreurs_500"].map(nombre),
+        "Latence médiane": par_version["latence_mediane_ms"].map(lambda v: nombre(v, 0, "ms")),
+        "Latence p95": par_version["latence_p95_ms"].map(lambda v: nombre(v, 0, "ms")),
+        "Inférence médiane": par_version["inference_mediane_ms"].map(lambda v: nombre(v, 0, "ms")),
+        "Score moyen": par_version["score_moyen"].map(lambda v: nombre(v, 3)),
+        "Taux de refus": par_version["taux_refus_pct"].map(lambda v: nombre(v, 1, "%")),
+    }
+).set_axis(par_version["version"]).T
+comparaison.index.name = "Indicateur"
+st.dataframe(comparaison, alt="Indicateurs clés, une colonne par version de l'API")
 voir_sql(SQL_PAR_VERSION)
 
 # ---------------------------------------------------------------------------

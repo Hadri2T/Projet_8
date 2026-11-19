@@ -93,3 +93,14 @@ def test_reponse_envoyee_avant_l_ecriture_en_base(client_exemple, monkeypatch):
 
     anyio.run(src.api.app, requete, recevoir, envoyer)
     assert evenements == ["réponse envoyée", "écriture en base"]
+
+
+def test_delais_maximaux_vers_postgresql():
+    """PostgreSQL reçoit des délais maximaux (connexion, réseau) ; SQLite, simple fichier local, n'en a pas besoin."""
+    from src.database import DELAI_MAX_BASE_S, parametres_connexion
+
+    assert parametres_connexion("postgresql+psycopg://u:p@hote/base") == {
+        "connect_timeout": DELAI_MAX_BASE_S,
+        "tcp_user_timeout": DELAI_MAX_BASE_S * 1000,
+    }
+    assert parametres_connexion("sqlite:///./test.db") == {}

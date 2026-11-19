@@ -192,7 +192,7 @@ pip install -r requirements-dev.txt
 pytest --cov=src
 ```
 
-Il y a 47 tests, avec 94 % de couverture du code. Ils écrivent dans une base SQLite temporaire, jamais dans la base de production.
+Il y a 48 tests, avec 95 % de couverture du code. Ils écrivent dans une base SQLite temporaire, jamais dans la base de production.
 - **Script d'inférence** : prédiction de référence sur le client d'exemple (0.361), probabilité entre 0 et 1, respect du seuil, imputation des variables manquantes, prédiction de plusieurs clients à la fois, imputation optimisée identique à celle du Projet 6.
 - **API, cas valides** : `/health`, client complet, client réduit aux champs obligatoires, valeurs `null` sur les champs facultatifs.
 - **API, cas d'erreur** :
@@ -206,7 +206,8 @@ Il y a 47 tests, avec 94 % de couverture du code. Ils écrivent dans une base SQ
   - les erreurs 422 et 500 sont enregistrées ;
   - `/health` n'est pas enregistré ;
   - une base en panne n'empêche pas l'API de répondre ;
-  - la réponse est entièrement envoyée au client **avant** l'écriture en base.
+  - la réponse est entièrement envoyée au client **avant** l'écriture en base ;
+  - des délais maximaux sont appliqués aux connexions PostgreSQL.
 
 ## Stockage des données de production
 
@@ -230,6 +231,7 @@ Table `predictions` :
 - **Évolution de la table** : la table est créée au démarrage de l'API si elle n'existe pas. Pour une colonne ajoutée après coup, comme `version_modele`, l'API lance aussi `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`, qui ne fait rien si la colonne existe déjà. Les appels enregistrés avant l'ajout de la colonne ont été complétés avec `home_credit_scoring-v1`, le seul modèle jamais déployé. Pour des changements plus nombreux, on utiliserait un outil de migration comme Alembic.
 - **Écriture en tâche de fond** : l'appel est écrit en base juste **après** l'envoi de la réponse. Le client n'attend donc pas la base.
 - **Robustesse** : si la base est injoignable, l'API répond quand même et signale le problème dans ses logs. Si l'API s'arrête brutalement entre l'envoi de la réponse et l'écriture, cette ligne est perdue : c'est acceptable pour du monitoring.
+- **Délais maximaux vers la base** : 10 s pour se connecter (`connect_timeout`), 10 s quand le réseau ne répond plus en pleine requête (`tcp_user_timeout`), 10 s pour obtenir une connexion libre (`pool_timeout`). Sans eux, une écriture sur un réseau coupé resterait bloquée jusqu'à environ 15 minutes (réglage TCP par défaut de Linux), et les threads bloqués finiraient par manquer à l'API. Testé avec Docker Compose en coupant le réseau de la base : l'API répond toujours en moins de 40 ms, l'écriture la plus longue échoue au bout de 10,4 s, puis tout repart au retour du réseau.
 - **Logs structurés** : en plus de la base, chaque appel produit une ligne JSON dans les logs de l'API, visibles dans l'onglet *Logs* de Render. Cette ligne contient tout, sauf les variables du client.
 - **RGPD** : aucun identifiant client n'est stocké, et les données restent dans l'Union européenne.
 ### Simulation de trafic de production
@@ -268,7 +270,7 @@ Les résultats des requêtes sont gardés en mémoire 60 secondes. Le dashboard 
 | Bloc | Contenu | Comment le lire |
 |---|---|---|
 | 1. Chiffres clés et alertes | Appels, taux d'erreur, erreurs 500, latence p95, temps d'inférence médian, taux de refus | Chaque indicateur porte la mention **OK** ou **Alerte**. Les seuils sont ceux du tableau d'alertes ci-dessous. |
-| 2. Comparaison des versions | Les mêmes indicateurs, une ligne par version de l'API, avec le modèle qui l'a servie | On y lit l'effet d'un changement de code ou de modèle. Par exemple, la latence p95 passe de 4,6 s (`7a8c3f1`) à 0,6 s (`2fb5352`) avec le même modèle `home_credit_scoring-v1` : le gain vient donc du code. |
+| 2. Comparaison des versions | Les mêmes indicateurs, une colonne par version de l'API, avec le modèle qui l'a servie | On y lit l'effet d'un changement de code ou de modèle. Par exemple, la latence p95 passe de 4,6 s (`7a8c3f1`) à 0,6 s (`2fb5352`) avec le même modèle `home_credit_scoring-v1` : le gain vient donc du code. |
 | 3. Latence et temps d'inférence | p95 minute par minute, une courbe par version | Les versions ont tourné à des dates différentes. Pour les comparer sur le même graphique, l'axe compte les minutes depuis le premier appel de chaque version. |
 | 4. Distribution des scores | Part des clients par tranche de probabilité, une courbe par version | Si les scores se déplacent vers la droite, au-delà du seuil de 0,5, il y aura plus de refus. |
 | 5. Dérive des données d'entrée | Médiane de l'âge, du montant du crédit, de `PAYMENT_RATE` ou de `EXT_SOURCE_2`, minute par minute, face à la médiane du jeu de validation | Un écart durable signale que la population a changé. Sur le trafic simulé, l'âge médian tombe de 43 à 29 ans au début de la campagne. |
