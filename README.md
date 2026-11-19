@@ -30,6 +30,7 @@ Livrables prévus : API de prédiction, tests automatisés, conteneurisation Doc
 ├── .github/workflows/
 │   └── ci-cd.yml       # Pipeline CI/CD : tests → image Docker → déploiement
 ├── Dockerfile            # Image de l'API (production)
+├── docker-compose.yml    # API + base PostgreSQL en local, chacune dans son conteneur
 ├── requirements.txt          # Dépendances de l'API (production)
 ├── requirements-dev.txt      # + dépendances de test
 └── requirements-analyse.txt  # + dépendances du notebook d'analyse (Evidently, matplotlib, Jupyter)
@@ -131,6 +132,54 @@ L'image ne contient que ce qui est nécessaire pour faire tourner l'API : le cod
 
 Mesures en local : environ 110 Mo de RAM et 12 à 15 ms par requête.
 
+## Lancer l'API et sa base de données avec Docker Compose
+
+[docker-compose.yml](docker-compose.yml) lance **deux conteneurs reliés entre eux** : l'API et une base PostgreSQL. Tout l'environnement de production tourne ainsi en local, sans dépendre de Neon.
+
+```
+        localhost:8765                localhost:5433
+              │                             │
+     ┌────────▼────────┐           ┌────────▼────────┐
+     │       api       │ ────────► │       db        │
+     │ (notre image)   │  db:5432  │  PostgreSQL 18  │
+     └─────────────────┘           └────────┬────────┘
+                                   volume "pgdata" (données conservées)
+```
+
+**1. Créer le mot de passe de la base** dans le fichier `.env`, qui n'est jamais publié :
+
+```bash
+echo "POSTGRES_PASSWORD=$(openssl rand -hex 16)" >> .env
+```
+
+**2. Lancer et arrêter :**
+
+```bash
+docker compose up --build -d   # construit l'image de l'API et démarre les deux conteneurs
+docker compose ps              # les deux services doivent être "healthy"
+docker compose down            # arrête les conteneurs (les données sont conservées)
+docker compose down -v         # arrête et efface les données
+```
+
+**3. Deux accès séparés :**
+- **l'API** sur http://localhost:8765/docs :
+  ```bash
+  curl -X POST http://localhost:8765/predict -H "Content-Type: application/json" -d @examples/client_exemple.json
+  ```
+- **la base**, directement en SQL, sur le port 5433 :
+  ```bash
+  psql -h localhost -p 5433 -U scoring -d scoring -c "SELECT id, date_appel, statut_http, probabilite_defaut, decision FROM predictions;"
+  ```
+
+**Fonctionnement :**
+- Sur le réseau créé par Compose, l'API joint la base par **son nom de service, `db`**. À l'intérieur d'un conteneur, `localhost` désigne le conteneur lui-même.
+- L'API ne démarre qu'une fois la base prête, grâce au contrôle de santé `pg_isready` et à `depends_on: condition: service_healthy`. Elle crée alors la table `predictions` si elle n'existe pas encore.
+- Les données sont rangées dans un **volume Docker**. Elles survivent à `docker compose down` et ne sont effacées que par `down -v`.
+- Le port 5433 est utilisé côté Mac, car 5432 est souvent déjà pris par un PostgreSQL installé localement.
+- En production, rien ne change : Render lance la même image, qui écrit dans Neon.
+
+Mesure en local : une écriture en base prend environ **5 ms** quand la base est dans le conteneur voisin.
+
 ## Lancer les tests
 
 ```bash
@@ -138,13 +187,13 @@ pip install -r requirements-dev.txt
 pytest --cov=src
 ```
 
-Il y a 39 tests, avec 94 % de couverture du code. Ils écrivent dans une base SQLite temporaire, jamais dans la base de production.
-- **Script d'inférence** : prédiction de référence sur le client d'exemple (0.361), probabilité entre 0 et 1, respect du seuil, imputation des variables manquantes, prédiction de plusieurs clients à la fois.
+Il y a 46 tests, avec 96 % de couverture du code. Ils écrivent dans une base SQLite temporaire, jamais dans la base de production.
+- **Script d'inférence** : prédiction de référence sur le client d'exemple (0.361), probabilité entre 0 et 1, respect du seuil, imputation des variables manquantes, prédiction de plusieurs clients à la fois, imputation optimisée identique à celle du Projet 6.
 - **API, cas valides** : `/health`, client complet, client réduit aux champs obligatoires, valeurs `null` sur les champs facultatifs.
 - **API, cas d'erreur** :
   - données manquantes : chaque champ obligatoire absent ou à `null`, client vide ;
   - valeurs hors plage : âge positif, trop jeune ou trop vieux, revenu, crédit ou annuité nuls ou négatifs, score externe hors de [0, 1] ;
-  - types incorrects : texte au lieu d'un nombre, variable inconnue, JSON mal formé ;
+  - types incorrects : texte au lieu d'un nombre, valeur infinie ou NaN, variable inconnue, JSON mal formé ;
   - erreur interne du modèle, qui doit renvoyer une 500 explicite.
 - **Stockage** :
   - un appel réussi est enregistré avec les bonnes valeurs ;

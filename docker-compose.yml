@@ -1,0 +1,47 @@
+# Lancement en local de l'API ET de sa base de données, chacune dans son conteneur.
+#
+#   docker compose up --build -d   -> construit l'image de l'API et démarre les deux conteneurs
+#   docker compose down            -> arrête les conteneurs (les données de la base sont conservées)
+#   docker compose down -v         -> arrête ET efface les données de la base
+#
+# Deux accès séparés depuis le Mac :
+#   - l'API sur http://localhost:8765 (Swagger : http://localhost:8765/docs)
+#   - la base PostgreSQL sur localhost:5433 (utilisateur "scoring", base "scoring")
+#
+# Le mot de passe de la base est lu dans le fichier .env (POSTGRES_PASSWORD=...), jamais publié sur GitHub.
+# En production (Render), rien ne change : l'API utilise toujours la base Neon.
+
+services:
+
+  # Conteneur 1 : la base de données PostgreSQL (image officielle, aucun code à écrire)
+  db:
+    image: postgres:18-alpine  # PostgreSQL 18, même version que Neon ; "alpine" = image légère
+    environment:
+      POSTGRES_USER: scoring
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}  # remplacé par la valeur écrite dans .env
+      POSTGRES_DB: scoring
+    ports:
+      - "5433:5432"  # port 5433 du Mac -> port 5432 du conteneur (5432 est déjà pris sur le Mac)
+    volumes:
+      - pgdata:/var/lib/postgresql  # "disque" qui garde les données quand le conteneur est arrêté
+    healthcheck:  # Docker vérifie toutes les 5 s que la base accepte les connexions
+      test: ["CMD-SHELL", "pg_isready -U scoring -d scoring"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # Conteneur 2 : l'API de scoring, construite avec notre Dockerfile
+  api:
+    build: .
+    ports:
+      - "8765:7860"  # port 8765 du Mac -> port 7860 du conteneur (port par défaut de l'API)
+    environment:
+      # "db" = nom du conteneur de la base : sur le réseau créé par Compose, chaque conteneur
+      # est joignable par son nom (localhost désignerait le conteneur de l'API lui-même)
+      DATABASE_URL: postgresql://scoring:${POSTGRES_PASSWORD}@db:5432/scoring
+    depends_on:
+      db:
+        condition: service_healthy  # l'API ne démarre que quand la base est prête
+
+volumes:
+  pgdata:  # volume géré par Docker (il survit à "docker compose down")
