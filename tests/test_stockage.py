@@ -1,5 +1,9 @@
 """Tests du stockage des appels (src/database.py et middleware de src/api.py) sur une base SQLite temporaire."""
 
+import json
+
+import anyio
+
 import src.api
 
 
@@ -60,3 +64,32 @@ def test_base_en_panne_n_empeche_pas_de_repondre(api, client_exemple, monkeypatc
     response = api.post("/predict", json=client_exemple)
     assert response.status_code == 200
     assert response.json()["probabilite_defaut"] == 0.361
+
+
+def test_reponse_envoyee_avant_l_ecriture_en_base(client_exemple, monkeypatch):
+    """Le client n'attend pas la base : la réponse est entièrement envoyée AVANT l'écriture (tâche de fond).
+
+    Le client de test de FastAPI attend la fin des tâches de fond avant de rendre la main : il ne permet
+    pas de voir l'ordre. On appelle donc l'application directement (protocole ASGI), en notant dans quel
+    ordre se produisent la fin de l'envoi de la réponse et l'écriture en base.
+    """
+    evenements = []
+    monkeypatch.setattr(src.api, "enregistrer_appel", lambda ligne: evenements.append("écriture en base"))
+
+    corps = json.dumps(client_exemple).encode()
+    requete = {
+        "type": "http", "asgi": {"version": "3.0"}, "http_version": "1.1", "method": "POST", "scheme": "http",
+        "path": "/predict", "raw_path": b"/predict", "query_string": b"", "root_path": "",
+        "headers": [(b"content-type", b"application/json")], "client": ("test", 1), "server": ("test", 80),
+    }
+
+    async def recevoir():
+        return {"type": "http.request", "body": corps, "more_body": False}
+
+    async def envoyer(message):
+        # Dernier morceau de la réponse : le client a tout reçu
+        if message["type"] == "http.response.body" and not message.get("more_body", False):
+            evenements.append("réponse envoyée")
+
+    anyio.run(src.api.app, requete, recevoir, envoyer)
+    assert evenements == ["réponse envoyée", "écriture en base"]

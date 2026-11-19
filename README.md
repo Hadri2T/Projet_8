@@ -192,7 +192,7 @@ pip install -r requirements-dev.txt
 pytest --cov=src
 ```
 
-Il y a 46 tests, avec 96 % de couverture du code. Ils écrivent dans une base SQLite temporaire, jamais dans la base de production.
+Il y a 47 tests, avec 94 % de couverture du code. Ils écrivent dans une base SQLite temporaire, jamais dans la base de production.
 - **Script d'inférence** : prédiction de référence sur le client d'exemple (0.361), probabilité entre 0 et 1, respect du seuil, imputation des variables manquantes, prédiction de plusieurs clients à la fois, imputation optimisée identique à celle du Projet 6.
 - **API, cas valides** : `/health`, client complet, client réduit aux champs obligatoires, valeurs `null` sur les champs facultatifs.
 - **API, cas d'erreur** :
@@ -205,7 +205,8 @@ Il y a 46 tests, avec 96 % de couverture du code. Ils écrivent dans une base SQ
   - seules les variables renseignées sont stockées ;
   - les erreurs 422 et 500 sont enregistrées ;
   - `/health` n'est pas enregistré ;
-  - une base en panne n'empêche pas l'API de répondre.
+  - une base en panne n'empêche pas l'API de répondre ;
+  - la réponse est entièrement envoyée au client **avant** l'écriture en base.
 
 ## Stockage des données de production
 
@@ -227,7 +228,8 @@ Table `predictions` :
 
 - **Base choisie par `DATABASE_URL`** : sur Render, cette variable est rangée dans les variables d'environnement du service ; en local, elle est dans le fichier `.env`. Si elle est absente, l'API écrit dans un fichier SQLite local.
 - **Évolution de la table** : la table est créée au démarrage de l'API si elle n'existe pas. Pour une colonne ajoutée après coup, comme `version_modele`, l'API lance aussi `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`, qui ne fait rien si la colonne existe déjà. Les appels enregistrés avant l'ajout de la colonne ont été complétés avec `home_credit_scoring-v1`, le seul modèle jamais déployé. Pour des changements plus nombreux, on utiliserait un outil de migration comme Alembic.
-- **Robustesse** : si la base est injoignable, l'API répond quand même et signale le problème dans ses logs.
+- **Écriture en tâche de fond** : l'appel est écrit en base juste **après** l'envoi de la réponse. Le client n'attend donc pas la base.
+- **Robustesse** : si la base est injoignable, l'API répond quand même et signale le problème dans ses logs. Si l'API s'arrête brutalement entre l'envoi de la réponse et l'écriture, cette ligne est perdue : c'est acceptable pour du monitoring.
 - **Logs structurés** : en plus de la base, chaque appel produit une ligne JSON dans les logs de l'API, visibles dans l'onglet *Logs* de Render. Cette ligne contient tout, sauf les variables du client.
 - **RGPD** : aucun identifiant client n'est stocké, et les données restent dans l'Union européenne.
 ### Simulation de trafic de production
@@ -358,6 +360,13 @@ Le rapport complet est le notebook [notebooks/03_optimisation_performances.ipynb
 | Débit sur Render | 1,6 appel/s | 5,6 appels/s |
 
 Les deux versions ont été comparées sur les mêmes clients, grâce à la colonne `version` de la base de production.
+
+### Écriture en base en tâche de fond
+
+Avant, l'API écrivait l'appel dans la base, puis seulement après envoyait la réponse : le client attendait l'écriture, qui ne le concerne pas. L'écriture est maintenant une **tâche de fond** (`BackgroundTask` de Starlette), lancée juste après l'envoi de la réponse.
+- Un test vérifie l'ordre des événements : la réponse est entièrement envoyée, puis l'écriture a lieu. Ce test échoue avec l'ancien code.
+- En local avec Docker Compose, la base est dans le conteneur voisin et l'écriture ne coûte que 0,7 ms : le temps vu par le client passe de 4,1 à 3,8 ms.
+- En production, le gain est égal au temps d'écriture vers Neon, mesuré dans les logs de Render (`ecriture_bdd_ms`). Il protège aussi le client quand Neon est lent, par exemple lorsqu'il se réveille après une mise en veille.
 
 ### L'image Docker et le choix du matériel
 

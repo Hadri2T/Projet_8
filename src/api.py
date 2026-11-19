@@ -19,7 +19,7 @@ from fastapi.encoders import jsonable_encoder
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from pydantic import BaseModel, ConfigDict, Field, create_model
-from starlette.concurrency import run_in_threadpool
+from starlette.background import BackgroundTask
 
 from src.database import creer_table, enregistrer_appel
 from src.predict import MODEL_VERSION, THRESHOLD, get_features, load_model, predict
@@ -180,11 +180,19 @@ async def enregistrer_les_appels(request: Request, call_next):
         **getattr(request.state, "log", {}),  # entrées, score, décision ou erreur, selon le cas
     }
 
-    # Écriture en base dans un thread à part, pour ne pas bloquer les autres requêtes pendant l'écriture.
-    # Si la base est en panne, on le signale dans les logs mais la réponse part quand même.
+    # Écriture en base en TÂCHE DE FOND : Starlette l'exécute juste APRÈS l'envoi de la réponse,
+    # le client n'attend donc pas la base. Une fonction classique (non async) passée à BackgroundTask
+    # tourne dans un thread à part, sans bloquer les autres requêtes.
+    response.background = BackgroundTask(enregistrer_et_journaliser, ligne)
+    return response
+
+
+def enregistrer_et_journaliser(ligne):
+    """Tâche de fond, après l'envoi de la réponse : écrit l'appel en base, puis la ligne de log JSON.
+    Si la base est en panne, on le signale dans les logs (le client a déjà reçu sa réponse)."""
     debut_ecriture = time.perf_counter()
     try:
-        await run_in_threadpool(enregistrer_appel, ligne)
+        enregistrer_appel(ligne)
     except Exception as e:
         logger.warning(json.dumps({"alerte": "écriture en base impossible", "detail": str(e)}))
     ecriture_ms = round((time.perf_counter() - debut_ecriture) * 1000, 2)
@@ -192,4 +200,3 @@ async def enregistrer_les_appels(request: Request, call_next):
     # Log structuré (sans les 215 variables, trop volumineuses pour les logs)
     resume = {k: v for k, v in ligne.items() if k != "entrees"}
     logger.info(json.dumps({**resume, "ecriture_bdd_ms": ecriture_ms}, default=str))
-    return response
