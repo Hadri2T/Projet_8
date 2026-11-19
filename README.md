@@ -18,6 +18,8 @@ Livrables prévus : API de prédiction, tests automatisés, conteneurisation Doc
 │   ├── 01_entrainement_modele_projet6.ipynb   # Notebook d'entraînement d'origine (Projet 6)
 │   ├── 02_analyse_drift_monitoring.ipynb      # Analyse du data drift et rapport de monitoring
 │   └── 03_optimisation_performances.ipynb     # Rapport d'optimisation des performances (étape 4)
+├── dashboard/
+│   └── app.py          # Dashboard Streamlit de monitoring (calculs faits en SQL)
 ├── scripts/
 │   ├── simulation_trafic.py  # Simulation de trafic de production vers l'API déployée
 │   └── mesure_inference.py   # Mesure et profilage du temps d'inférence (avant / après optimisation)
@@ -33,7 +35,7 @@ Livrables prévus : API de prédiction, tests automatisés, conteneurisation Doc
 ├── docker-compose.yml    # API + base PostgreSQL en local, chacune dans son conteneur
 ├── requirements.txt          # Dépendances de l'API (production)
 ├── requirements-dev.txt      # + dépendances de test
-└── requirements-analyse.txt  # + dépendances du notebook d'analyse (Evidently, matplotlib, Jupyter)
+└── requirements-analyse.txt  # + dépendances de l'analyse (Evidently, matplotlib, Jupyter, Streamlit)
 ```
 
 ## Le modèle
@@ -240,6 +242,32 @@ python scripts/simulation_trafic.py --help      # options : adresse, nombre de c
 Le script lit le jeu de données préparé au projet précédent, dans `data/prepared_dataset.parquet`. Ce fichier n'est pas versionné.
 
 - **Volume** : 3 000 appels occupent 9 Mo, soit environ 3 Ko par appel, car PostgreSQL compresse le JSON. Sans les valeurs manquantes, les variables d'un client pèsent environ 30 % de moins. L'offre gratuite de Neon (0,5 Go) permet donc de l'ordre de 150 000 appels.
+
+## Dashboard de monitoring
+
+Le dashboard Streamlit [dashboard/app.py](dashboard/app.py) sert au **suivi rapide** de la production. **Toutes ses valeurs sont calculées par la base de données, avec des requêtes SQL** (PostgreSQL) : Python se contente d'afficher le résultat. Sous chaque bloc, « Voir la requête SQL » montre la requête utilisée.
+
+```bash
+pip install -r requirements-analyse.txt
+streamlit run dashboard/app.py      # puis http://localhost:8501
+```
+
+**Le menu de gauche** permet de choisir :
+- **la base** : *Production (Neon)*, qui contient les appels reçus par l'API sur Render (il faut `DATABASE_URL` dans `.env`), ou *Local (Docker Compose)*, qui demande d'avoir lancé `docker compose up -d` ;
+- **les versions de l'API** à afficher. Chaque version correspond au hash du commit qui a produit les réponses.
+
+Les résultats des requêtes sont gardés en mémoire 60 secondes. Le dashboard ne fait que lire la base et n'affiche que des agrégats, jamais le dossier d'un client.
+
+| Bloc | Contenu | Comment le lire |
+|---|---|---|
+| 1. Chiffres clés et alertes | Appels, taux d'erreur, erreurs 500, latence p95, temps d'inférence médian, taux de refus | Chaque indicateur porte la mention **OK** ou **Alerte**. Les seuils sont ceux du tableau d'alertes ci-dessous. |
+| 2. Comparaison des versions | Les mêmes indicateurs, une ligne par version | On y lit l'effet d'un changement de code. Par exemple, la latence p95 passe de 4,6 s (`7a8c3f1`) à 0,6 s (`2fb5352`) après l'optimisation. |
+| 3. Latence et temps d'inférence | p95 minute par minute, une courbe par version | Les versions ont tourné à des dates différentes. Pour les comparer sur le même graphique, l'axe compte les minutes depuis le premier appel de chaque version. |
+| 4. Distribution des scores | Part des clients par tranche de probabilité, une courbe par version | Si les scores se déplacent vers la droite, au-delà du seuil de 0,5, il y aura plus de refus. |
+| 5. Dérive des données d'entrée | Médiane de l'âge, du montant du crédit, de `PAYMENT_RATE` ou de `EXT_SOURCE_2`, minute par minute, face à la médiane du jeu de validation | Un écart durable signale que la population a changé. Sur le trafic simulé, l'âge médian tombe de 43 à 29 ans au début de la campagne. |
+| 6. Erreurs | Appels par code HTTP, erreurs 422 par champ en cause | Si un même champ revient sans cesse, une application cliente envoie des données mal formées. |
+
+Le dashboard **complète** le notebook d'analyse sans le remplacer. Il sert au suivi au quotidien, tandis que le notebook fait l'analyse statistique complète de la dérive, sur les 215 variables, avec Evidently.
 
 ## Analyse du data drift et monitoring
 

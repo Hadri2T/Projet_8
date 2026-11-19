@@ -7,3 +7,5 @@ matplotlib==3.11.2
 # Exécution du notebook (dans VS Code / Jupyter, ou en ligne de commande avec nbconvert)
 ipykernel==7.4.0
 nbconvert==7.17.2
+# Dashboard de monitoring (lecture des bases de production, calculs faits en SQL)
+streamlit==1.66.1
