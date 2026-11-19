@@ -16,9 +16,13 @@ USER user
 WORKDIR /home/user/app
 
 # Dépendances installées AVANT de copier le code : Docker garde cette étape en cache
-# tant que requirements.txt ne change pas (builds beaucoup plus rapides)
+# tant que requirements.txt ne change pas (builds beaucoup plus rapides).
+# Dans la MÊME instruction, on supprime les suites de tests livrées avec pandas, scipy, numpy, scikit-learn…
+# (112 Mo jamais utilisés en production). Une image est un empilement de couches : une suppression faite dans
+# une instruction suivante cacherait ces fichiers sans les retirer de la couche qui les contient.
 COPY --chown=user requirements.txt .
-RUN pip install --no-cache-dir --user -r requirements.txt
+RUN pip install --no-cache-dir --user -r requirements.txt \
+    && find /home/user/.local/lib/python3.12/site-packages -type d -name tests -prune -exec rm -rf {} +
 
 # Uniquement ce qui est nécessaire pour faire tourner l'API (pas de notebooks, pas de tests)
 COPY --chown=user src/ src/
@@ -34,6 +38,13 @@ ENV GIT_SHA=$GIT_SHA
 # la commande de lancement et le healthcheck lisent donc PORT au lieu d'un numéro écrit en dur
 ENV PORT=7860
 EXPOSE 7860
+
+# Un seul fil de calcul pour les bibliothèques numériques. Le conteneur voit tous les cœurs de la machine
+# (11 sur le Mac) alors que Render ne lui en donne qu'un dixième : numpy et scipy (OpenBLAS) lançaient
+# 20 fils au démarrage, et OpenMP (utilisé par LightGBM) 10 de plus à la première prédiction, même avec
+# n_jobs=1, pour scorer un seul client à la fois. Mesuré : démarrage plus rapide, scores identiques.
+ENV OPENBLAS_NUM_THREADS=1 \
+    OMP_NUM_THREADS=1
 
 # Docker vérifie toutes les 30 s que l'API répond (le conteneur est marqué "unhealthy" sinon)
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s \

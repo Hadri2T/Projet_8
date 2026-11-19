@@ -22,7 +22,8 @@ Livrables prévus : API de prédiction, tests automatisés, conteneurisation Doc
 │   └── app.py          # Dashboard Streamlit de monitoring (calculs faits en SQL)
 ├── scripts/
 │   ├── simulation_trafic.py  # Simulation de trafic de production vers l'API déployée
-│   └── mesure_inference.py   # Mesure et profilage du temps d'inférence (avant / après optimisation)
+│   ├── mesure_inference.py   # Mesure et profilage du temps d'inférence (avant / après optimisation)
+│   └── mesure_docker.py      # Mesure de l'image Docker avec un CPU et une mémoire limités (simulation de Render)
 ├── examples/
 │   └── client_exemple.json   # Exemple de client au format attendu
 ├── tests/
@@ -131,8 +132,10 @@ L'image ne contient que ce qui est nécessaire pour faire tourner l'API : le cod
 - **`libgomp1`** est ajoutée, car LightGBM en a besoin.
 - L'API tourne avec un **utilisateur sans droits administrateur**.
 - Un **contrôle de santé** Docker appelle `/health` toutes les 30 secondes.
+- Les **suites de tests des bibliothèques** (pandas, scipy, numpy, scikit-learn…) sont supprimées dans la même instruction que leur installation. Elles pesaient 145 Mo et ne servent jamais en production.
+- Les bibliothèques de calcul utilisent **un seul fil** (`OPENBLAS_NUM_THREADS=1`, `OMP_NUM_THREADS=1`). Le conteneur voit tous les cœurs de la machine, alors que Render ne lui en accorde qu'un dixième.
 
-Mesures en local : environ 110 Mo de RAM et 12 à 15 ms par requête.
+Mesures en local : image de 651 Mo (144 Mo à télécharger), environ 120 Mo de RAM, environ 3 ms par requête.
 
 ## Lancer l'API et sa base de données avec Docker Compose
 
@@ -356,11 +359,40 @@ Le rapport complet est le notebook [notebooks/03_optimisation_performances.ipynb
 
 Les deux versions ont été comparées sur les mêmes clients, grâce à la colonne `version` de la base de production.
 
+### L'image Docker et le choix du matériel
+
+Le script `scripts/mesure_docker.py` lance l'image en limitant ses ressources (`--cpus 0.1 --memory 512m`, comme l'offre gratuite de Render). Il mesure le démarrage, la latence, la mémoire et le nombre de fils.
+
+| Médiane de 3 essais | Image d'origine | Image optimisée |
+|---|---|---|
+| Taille décompressée / à télécharger | 796 Mo / 172 Mo | **651 Mo / 144 Mo** |
+| Fils de calcul du processus | 32 | **2** |
+| Démarrage à 0,5 CPU | 2,5 s | **2,0 s** |
+| Inférence, mémoire, débit sous charge | | identiques |
+| Scores de 1 000 clients | | identiques (écart maximal : 0,0) |
+
+**Le vrai levier, c'est le processeur.** On observe un effet de seuil :
+
+| CPU alloué | 0,1 (Render gratuit) | 0,2 | 0,3 | 0,5 | 1 |
+|---|---|---|---|---|---|
+| Démarrage du conteneur | environ 1 min | 21 s | 7 s | **2 s** | 1 s |
+| Inférence médiane | 187 ms | 10 ms | 3 ms | **2,5 ms** | 2,4 ms |
+
+- Avec 0,1 CPU, Linux accorde au conteneur 10 ms de calcul toutes les 100 ms, puis le met en pause.
+- Sur l'offre gratuite, l'API s'endort après 15 minutes sans requête : chaque réveil coûte donc environ une minute au premier client.
+- **Recommandation pour une vraie mise en production : au moins 0,5 CPU, sans mise en veille.**
+
+**Pistes non retenues** (détails dans le notebook) :
+- un **build en plusieurs étapes** (« multi-stage ») : il ne ferait rien gagner, puisque les bibliothèques arrivent déjà compilées et qu'il n'y a aucun outil de compilation à retirer ;
+- une **image Alpine** : les versions compilées de LightGBM ne fonctionnent pas dessus ;
+- **retirer scikit-learn et pandas** : environ 80 Mo de moins, mais il faudrait réenregistrer le modèle dans un autre format.
+
 Pour relancer les mesures :
 
 ```bash
 python -m scripts.mesure_inference          # mesure locale et non-régression (sans base de données)
 python scripts/simulation_trafic.py --normaux 1000 --derives 0 --taux-erreur 0 --bilan data/mesure_render.json   # trafic vers Render
+docker build -t scoring-api:apres . && python scripts/mesure_docker.py --image scoring-api:apres --cpus 0.1 0.5 1 --repetitions 3   # image Docker
 ```
 
 ## Pipeline CI/CD
