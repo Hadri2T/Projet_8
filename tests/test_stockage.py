@@ -11,6 +11,7 @@ def test_appel_reussi_enregistre(api, client_exemple, derniere_ligne):
     assert ligne["decision"] == "accorde"
     assert ligne["erreur"] is None
     assert ligne["version"] == "local"  # pas de GIT_SHA en dehors de l'image Docker construite par la CI
+    assert ligne["version_modele"] == "home_credit_scoring-v1"
     assert ligne["latence_ms"] > 0
     assert 0 < ligne["inference_ms"] <= ligne["latence_ms"]
     assert ligne["entrees"]["AMT_CREDIT"] == client_exemple["AMT_CREDIT"]
@@ -28,6 +29,9 @@ def test_erreur_422_enregistree(api, client_exemple, derniere_ligne):
     assert ligne["statut_http"] == 422
     assert "AMT_CREDIT" in ligne["erreur"]
     assert ligne["probabilite_defaut"] is None
+    # Les erreurs portent aussi les deux versions : on sait quelle version du code les a produites
+    assert ligne["version"] == "local"
+    assert ligne["version_modele"] == "home_credit_scoring-v1"
 
 
 def test_erreur_500_enregistree(api, client_exemple, derniere_ligne, monkeypatch):

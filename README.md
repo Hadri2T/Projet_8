@@ -85,7 +85,7 @@ La documentation interactive (Swagger) est disponible sur http://127.0.0.1:8000/
 | Route | Méthode | Rôle |
 |---|---|---|
 | `/` | GET | Message d'accueil |
-| `/health` | GET | Vérifie que l'API répond : `{"status": "ok"}` |
+| `/health` | GET | Vérifie que l'API répond et indique ce qui tourne : `{"status": "ok", "version_api": "805742a", "version_modele": "home_credit_scoring-v1"}` |
 | `/predict` | POST | Score un client |
 
 Exemple avec curl :
@@ -219,9 +219,11 @@ Table `predictions` :
 | `entrees` | Variables envoyées par le client, au format JSON. Seules celles renseignées sont stockées. |
 | `probabilite_defaut`, `decision` | Sortie du modèle |
 | `erreur` | Champs en cause pour une 422, message pour une 500 |
-| `version` | Hash du commit qui a traité l'appel, inscrit dans l'image Docker par la CI |
+| `version` | Version de l'API : hash du commit qui a traité l'appel, inscrit dans l'image Docker par la CI |
+| `version_modele` | Version du modèle qui a calculé le score : nom et version dans le registry MLflow (`home_credit_scoring-v1`) |
 
 - **Base choisie par `DATABASE_URL`** : sur Render, cette variable est rangée dans les variables d'environnement du service ; en local, elle est dans le fichier `.env`. Si elle est absente, l'API écrit dans un fichier SQLite local.
+- **Évolution de la table** : la table est créée au démarrage de l'API si elle n'existe pas. Pour une colonne ajoutée après coup, comme `version_modele`, l'API lance aussi `ALTER TABLE ... ADD COLUMN IF NOT EXISTS`, qui ne fait rien si la colonne existe déjà. Les appels enregistrés avant l'ajout de la colonne ont été complétés avec `home_credit_scoring-v1`, le seul modèle jamais déployé. Pour des changements plus nombreux, on utiliserait un outil de migration comme Alembic.
 - **Robustesse** : si la base est injoignable, l'API répond quand même et signale le problème dans ses logs.
 - **Logs structurés** : en plus de la base, chaque appel produit une ligne JSON dans les logs de l'API, visibles dans l'onglet *Logs* de Render. Cette ligne contient tout, sauf les variables du client.
 - **RGPD** : aucun identifiant client n'est stocké, et les données restent dans l'Union européenne.
@@ -261,7 +263,7 @@ Les résultats des requêtes sont gardés en mémoire 60 secondes. Le dashboard 
 | Bloc | Contenu | Comment le lire |
 |---|---|---|
 | 1. Chiffres clés et alertes | Appels, taux d'erreur, erreurs 500, latence p95, temps d'inférence médian, taux de refus | Chaque indicateur porte la mention **OK** ou **Alerte**. Les seuils sont ceux du tableau d'alertes ci-dessous. |
-| 2. Comparaison des versions | Les mêmes indicateurs, une ligne par version | On y lit l'effet d'un changement de code. Par exemple, la latence p95 passe de 4,6 s (`7a8c3f1`) à 0,6 s (`2fb5352`) après l'optimisation. |
+| 2. Comparaison des versions | Les mêmes indicateurs, une ligne par version de l'API, avec le modèle qui l'a servie | On y lit l'effet d'un changement de code ou de modèle. Par exemple, la latence p95 passe de 4,6 s (`7a8c3f1`) à 0,6 s (`2fb5352`) avec le même modèle `home_credit_scoring-v1` : le gain vient donc du code. |
 | 3. Latence et temps d'inférence | p95 minute par minute, une courbe par version | Les versions ont tourné à des dates différentes. Pour les comparer sur le même graphique, l'axe compte les minutes depuis le premier appel de chaque version. |
 | 4. Distribution des scores | Part des clients par tranche de probabilité, une courbe par version | Si les scores se déplacent vers la droite, au-delà du seuil de 0,5, il y aura plus de refus. |
 | 5. Dérive des données d'entrée | Médiane de l'âge, du montant du crédit, de `PAYMENT_RATE` ou de `EXT_SOURCE_2`, minute par minute, face à la médiane du jeu de validation | Un écart durable signale que la population a changé. Sur le trafic simulé, l'âge médian tombe de 43 à 29 ans au début de la campagne. |

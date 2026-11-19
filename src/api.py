@@ -22,7 +22,7 @@ from pydantic import BaseModel, ConfigDict, Field, create_model
 from starlette.concurrency import run_in_threadpool
 
 from src.database import creer_table, enregistrer_appel
-from src.predict import THRESHOLD, get_features, load_model, predict
+from src.predict import MODEL_VERSION, THRESHOLD, get_features, load_model, predict
 
 # Logs structurés : une ligne JSON par appel, lisible en direct dans l'onglet Logs de Render
 logging.basicConfig(level=logging.INFO, format="%(message)s")
@@ -122,8 +122,9 @@ def accueil():
 
 @app.get("/health")
 def health():
-    """Vérifie que l'API répond (utilisé pour contrôler le déploiement)."""
-    return {"status": "ok"}
+    """Vérifie que l'API répond (utilisé pour contrôler le déploiement) et indique ce qui tourne :
+    version du code de l'API (hash du commit) et version du modèle."""
+    return {"status": "ok", "version_api": VERSION, "version_modele": MODEL_VERSION}
 
 
 @app.post("/predict", response_model=Prediction)
@@ -175,6 +176,7 @@ async def enregistrer_les_appels(request: Request, call_next):
         "statut_http": response.status_code,
         "latence_ms": round((time.perf_counter() - debut) * 1000, 2),
         "version": VERSION,
+        "version_modele": MODEL_VERSION,
         **getattr(request.state, "log", {}),  # entrées, score, décision ou erreur, selon le cas
     }
 

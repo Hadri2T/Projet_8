@@ -41,9 +41,6 @@ BASES = {
     ),
 }
 
-# Le modèle n'a pas changé d'une version de l'API à l'autre (consigne : on garde le même modèle)
-VERSION_MODELE = "LightGBM home_credit_scoring v1 (registry MLflow du projet précédent)"
-
 # Seuils d'alerte : les mêmes que dans le notebook 02, fixés a priori
 SEUIL_TAUX_ERREUR_PCT = 5
 SEUIL_LATENCE_P95_MS = 1000
@@ -72,9 +69,12 @@ GRIS = "#898781"  # seuils, références et libellés secondaires
 # Requêtes SQL (PostgreSQL)
 # ---------------------------------------------------------------------------
 
-# Liste des versions de l'API présentes en base, de la plus ancienne à la plus récente
+# Liste des versions de l'API présentes en base, de la plus ancienne à la plus récente,
+# avec le ou les modèles qui ont servi chacune ("inconnue" si la version du modèle n'a pas été enregistrée)
 SQL_VERSIONS = """
-SELECT version, min(date_appel) AS premier_appel, count(*) AS appels
+SELECT version,
+       string_agg(DISTINCT coalesce(version_modele, 'inconnue'), ', ') AS version_modele,
+       min(date_appel) AS premier_appel, count(*) AS appels
 FROM predictions
 GROUP BY version
 ORDER BY premier_appel
@@ -102,9 +102,12 @@ FROM predictions
 WHERE version = ANY(:versions)
 """
 
-# Une ligne par version : c'est ce tableau qui montre l'amélioration (ou la dégradation) d'une version à l'autre
+# Une ligne par version : c'est ce tableau qui montre l'amélioration (ou la dégradation) d'une version à l'autre.
+# La colonne du modèle indique si un changement vient du code de l'API ou du modèle.
 SQL_PAR_VERSION = f"""
-SELECT version, min(date_appel) AS premier_appel, {INDICATEURS}
+SELECT version,
+       string_agg(DISTINCT coalesce(version_modele, 'inconnue'), ', ') AS version_modele,
+       min(date_appel) AS premier_appel, {INDICATEURS}
 FROM predictions
 WHERE version = ANY(:versions)
 GROUP BY version
@@ -308,14 +311,18 @@ with st.sidebar:
     )
 
 st.title("Monitoring de l'API de scoring")
-st.caption(
-    f"Modèle : {VERSION_MODELE}, le même pour toutes les versions de l'API. "
-    f"Toutes les valeurs sont calculées en SQL par la base « {nom_base} »."
-)
 
 if not versions:
     st.info("Sélectionnez au moins une version dans le menu de gauche.", title="Aucune version sélectionnée")
     st.stop()
+
+# Modèle(s) qui ont servi les versions sélectionnées, lus dans la base
+modeles = toutes_versions.loc[toutes_versions["version"].isin(versions), "version_modele"]
+modeles = sorted({m.strip() for liste in modeles for m in liste.split(",")})
+st.caption(
+    f"Modèle : {', '.join(modeles)} (nom et version dans le registry MLflow). "
+    f"Toutes les valeurs sont calculées en SQL par la base « {nom_base} »."
+)
 
 # ---------------------------------------------------------------------------
 # 1. Chiffres clés et alertes
@@ -374,14 +381,18 @@ voir_sql(SQL_CHIFFRES_CLES)
 # ---------------------------------------------------------------------------
 
 st.subheader("2. Comparaison des versions")
-st.caption("Une ligne par version de l'API : on y lit l'effet de chaque changement de code sur les mêmes indicateurs.")
+st.caption(
+    "Une ligne par version de l'API, avec le modèle qui l'a servie : on y lit l'effet de chaque changement "
+    "(code ou modèle) sur les mêmes indicateurs."
+)
 par_version = lire(nom_base, SQL_PAR_VERSION, versions=versions)
 st.dataframe(
     par_version,
     hide_index=True,
     alt="Indicateurs clés par version de l'API",
     column_config={
-        "version": "Version",
+        "version": "Version API",
+        "version_modele": "Modèle",
         "premier_appel": st.column_config.DatetimeColumn("1er appel (UTC)", format="DD/MM/YY HH:mm"),
         "appels": st.column_config.NumberColumn("Appels"),
         "taux_erreur_pct": st.column_config.NumberColumn("Erreurs %", format="%.1f"),

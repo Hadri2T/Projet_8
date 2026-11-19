@@ -22,6 +22,11 @@ import pandas as pd
 # Chemin du modèle, calculé depuis ce fichier pour fonctionner quel que soit le dossier de lancement
 MODEL_PATH = Path(__file__).resolve().parent.parent / "model" / "model.pkl"
 
+# Version du modèle : son nom et sa version dans le model registry MLflow du Projet 6.
+# Enregistrée avec chaque appel, à côté de la version du code de l'API.
+# À changer en même temps que model.pkl si on déploie un nouveau modèle.
+MODEL_VERSION = "home_credit_scoring-v1"
+
 # Seuil de décision optimal trouvé au Projet 6 (minimisation du coût métier 10*FN + FP)
 # probabilité de défaut >= seuil -> crédit refusé
 THRESHOLD = 0.50

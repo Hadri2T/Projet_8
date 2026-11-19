@@ -21,7 +21,8 @@ def champ_en_erreur(response):
 def test_health(api):
     response = api.get("/health")
     assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
+    # /health indique aussi ce qui tourne : version du code ("local" hors image Docker) et version du modèle
+    assert response.json() == {"status": "ok", "version_api": "local", "version_modele": "home_credit_scoring-v1"}
 
 
 def test_accueil(api):

@@ -12,7 +12,7 @@ La base est choisie par la variable d'environnement DATABASE_URL :
 
 import os
 
-from sqlalchemy import JSON, Column, DateTime, Float, Integer, MetaData, String, Table, Text, create_engine
+from sqlalchemy import JSON, Column, DateTime, Float, Integer, MetaData, String, Table, Text, create_engine, text
 
 DATABASE_URL = os.getenv("DATABASE_URL", "sqlite:///./logs_local.db")
 # Neon fournit une adresse "postgresql://..." : on indique à SQLAlchemy d'utiliser le pilote psycopg (version 3)
@@ -37,12 +37,19 @@ predictions = Table(
     Column("decision", String(10)),
     Column("erreur", Text),
     Column("version", String(40)),  # hash du commit qui a produit la réponse
+    Column("version_modele", String(60)),  # nom et version du modèle dans le registry MLflow
 )
 
 
 def creer_table():
     """Crée la table si elle n'existe pas encore (sans effet si elle existe déjà)."""
     metadata.create_all(engine)
+    # create_all ne modifie pas une table qui existe déjà : la colonne version_modele, ajoutée après coup,
+    # est donc créée à la main si elle manque (petite migration). "IF NOT EXISTS" : sans effet si elle existe.
+    # SQLite (tests) n'est pas concerné : sa table est toujours neuve, donc déjà créée avec la colonne.
+    if engine.dialect.name == "postgresql":
+        with engine.begin() as conn:
+            conn.execute(text("ALTER TABLE predictions ADD COLUMN IF NOT EXISTS version_modele VARCHAR(60)"))
 
 
 def enregistrer_appel(ligne):
